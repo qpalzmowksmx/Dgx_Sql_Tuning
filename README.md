@@ -1,9 +1,13 @@
 # DGX SQL Tuning
 
+[![CI](https://github.com/qpalzmowksmx/Dgx_Sql_Tuning/actions/workflows/ci.yml/badge.svg)](https://github.com/qpalzmowksmx/Dgx_Sql_Tuning/actions/workflows/ci.yml)
+
 > Oracle SQL을 외부 SaaS로 전송하지 않고, 로컬 LLM과 Oracle 검증을 결합해
 > **분석 → 튜닝 → 비평 → 검증 → 벤치마크**를 자동화한 온프레미스 SQL 튜닝 플랫폼
 
 ![DGX SQL Tuning architecture](docs/assets/portfolio-hero.png)
+
+_프로젝트의 데이터 흐름을 표현한 개념 일러스트입니다._
 
 ## 프로젝트 소개
 
@@ -60,8 +64,13 @@ flowchart LR
     H --> I{"최종 Gate"}
     I -- "통과" --> J["SUCCESS"]
     I -- "실패" --> K["RETRY / FAILED"]
-    J --> L["Review UI"]
-    K --> L
+
+    B -. "분석 자료" .-> W[("Workspace 산출물")]
+    C -. "튜닝 결과" .-> W
+    F -. "비평 결과" .-> W
+    G -. "검증 결과" .-> W
+    H -. "성능 결과" .-> W
+    W -. "읽기 전용 조회" .-> L["Review UI"]
 ```
 
 ### 처리 상태
@@ -87,7 +96,6 @@ COLLECT_SQL
 | Critic 1 | `Llamacpp/DeepSeekV4FlashDgxSpark` | 의미·문법·카디널리티·Oracle 위험 검토 |
 | Critic 2 | `Llamacpp/Hy3` | 독립적인 2차 비평 및 reasoning 검증 |
 | Final gate | Oracle | Parse, plan, 결과 동등성 및 성능 검증 |
-
 세 모델 서버는 기본적으로 `127.0.0.1:8080`을 사용합니다. 단일 DGX에서 포트와
 통합 메모리를 공유하므로 한 번에 하나의 모델 stack만 실행하는 것을 전제로 합니다.
 
@@ -165,7 +173,7 @@ LLM이 생성한 SQL은 다음 gate를 순서대로 통과해야 합니다.
 ### Python 환경
 
 ```bash
-git clone <PUBLIC_REPOSITORY_URL>
+git clone https://github.com/qpalzmowksmx/Dgx_Sql_Tuning.git
 cd Dgx_Sql_Tuning
 
 python3 -m venv .venv
@@ -258,6 +266,14 @@ python3 ReviewUI/server.py
 python3 ReviewUI/server.py --workspace /path/to/private-workspace
 ```
 
+## 실제 구현 화면
+
+![Review UI public demo](docs/assets/review-ui-demo.jpg)
+
+화면은 실제 `ReviewUI/server.py`를 익명화된 합성 workspace로 실행해 캡처했습니다.
+표시된 SQL ID, 객체명, 실행시간과 개선율은 UI 시연용 값이며 실제 고객·회사 데이터나
+운영 성능 수치가 아닙니다.
+
 ## 테스트
 
 ```bash
@@ -313,6 +329,8 @@ docker compose \
 - 모델 weight, runtime cache와 container image
 - 실행 workspace, 로그, benchmark 및 review 결과
 - 내부 장비 경로와 사설 repository URL
+
+보안 경계와 취약점 제보 절차는 [SECURITY.md](SECURITY.md)를 참고하세요.
 
 ## 제한사항
 
