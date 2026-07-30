@@ -90,3 +90,4 @@ chat-export-*
 *.docx
 *.pdf
 *.png
+!docs/assets/*.png
