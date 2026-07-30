@@ -1,0 +1,112 @@
+{
+  "metadata_version": 1,
+  "captured_at": "YYYY-MM-DDTHH:MM:SS+09:00",
+  "database": {
+    "version": "Oracle Database version",
+    "db_unique_name": "DATABASE_UNIQUE_NAME",
+    "default_schema": "APPLICATION_SCHEMA",
+    "character_set": "AL32UTF8",
+    "optimizer_parameters": {
+      "optimizer_features_enable": "19.1.0",
+      "optimizer_mode": "ALL_ROWS"
+    },
+    "nls_parameters": {
+      "nls_date_format": "YYYY-MM-DD HH24:MI:SS",
+      "nls_sort": "BINARY",
+      "nls_comp": "BINARY"
+    }
+  },
+  "objects": [
+    {
+      "owner": "APPLICATION_SCHEMA",
+      "name": "TABLE_NAME",
+      "object_type": "TABLE",
+      "columns": [
+        {
+          "name": "COLUMN_NAME",
+          "column_id": 1,
+          "data_type": "NUMBER",
+          "data_length": 22,
+          "char_length": null,
+          "char_used": null,
+          "precision": 19,
+          "scale": 0,
+          "nullable": false,
+          "data_default": null,
+          "num_distinct": null,
+          "num_nulls": null,
+          "density": null,
+          "histogram": "NONE",
+          "low_value": null,
+          "high_value": null,
+          "last_analyzed": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "PK_TABLE_NAME",
+          "type": "PRIMARY KEY",
+          "status": "ENABLED",
+          "validated": true,
+          "columns": [
+            "COLUMN_NAME"
+          ],
+          "referenced_owner": null,
+          "referenced_table": null,
+          "referenced_constraint": null,
+          "delete_rule": null,
+          "search_condition": null
+        }
+      ],
+      "indexes": [
+        {
+          "owner": "APPLICATION_SCHEMA",
+          "name": "PK_TABLE_NAME",
+          "index_type": "NORMAL",
+          "table_owner": "APPLICATION_SCHEMA",
+          "table_name": "TABLE_NAME",
+          "unique": true,
+          "status": "VALID",
+          "visibility": "VISIBLE",
+          "partitioned": false,
+          "blevel": null,
+          "leaf_blocks": null,
+          "clustering_factor": null,
+          "num_rows": null,
+          "distinct_keys": null,
+          "compression": "DISABLED",
+          "prefix_length": null,
+          "columns": [
+            {
+              "name": "COLUMN_NAME",
+              "position": 1,
+              "direction": "ASC",
+              "expression": null
+            }
+          ],
+          "last_analyzed": null
+        }
+      ],
+      "partitions": [
+        {
+          "name": "PARTITION_NAME",
+          "position": 1,
+          "high_value": null,
+          "num_rows": null,
+          "blocks": null,
+          "last_analyzed": null
+        }
+      ],
+      "statistics": {
+        "num_rows": null,
+        "blocks": null,
+        "avg_row_len": null,
+        "sample_size": null,
+        "stale_stats": null,
+        "last_analyzed": null
+      },
+      "definition": null,
+      "dependencies": []
+    }
+  ]
+}

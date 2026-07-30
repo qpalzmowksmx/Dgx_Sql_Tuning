@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-sql.local/contracts/query_context.schema.json",
+  "title": "Oracle per-query context",
+  "type": "object",
+  "properties": {
+    "captured_at": {"type": "string"},
+    "sql_id": {"type": ["string", "null"]},
+    "child_number": {"type": ["integer", "null"]},
+    "plan_hash_value": {"type": ["integer", "null"]},
+    "binds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": ["string", "null"]},
+          "position": {"type": ["integer", "null"]},
+          "oracle_type": {"type": ["string", "null"]},
+          "value": {}
+        },
+        "required": ["value"],
+        "additionalProperties": false
+      }
+    },
+    "execution_plan": {"type": "object"},
+    "runtime_metrics": {"type": "object"},
+    "optimizer_parameters": {"type": "object"},
+    "nls_parameters": {"type": "object"},
+    "validation_feedback": {"type": "object"},
+    "anonymized_samples": {"type": "array"},
+    "notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "required": [
+    "captured_at",
+    "binds",
+    "execution_plan",
+    "runtime_metrics"
+  ],
+  "additionalProperties": false
+}

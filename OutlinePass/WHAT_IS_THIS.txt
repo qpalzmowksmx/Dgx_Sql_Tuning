@@ -1,0 +1,34 @@
+OutlinePass
+
+Purpose:
+
+This directory provides an optional outline generation step for Oracle SQL tuning.
+It is not part of the default AutorunEnum cycle.
+
+Use this only when a human reviewer wants a short, inspectable tuning outline before
+running the full Qwen writer -> critic -> Oracle validation loop.
+
+Important:
+
+- This is not chain-of-thought.
+- Do not ask the model to print hidden reasoning or <think> blocks.
+- The output is a compact JSON outline for review and handoff.
+- The generated outline can be attached to reports or fed into a later tuning cycle.
+
+Default output schema:
+
+{"ok":true,"outline":["..."],"risk":["..."],"check":["..."],"handoff":["..."]}
+
+Typical use:
+
+1. Start a local OpenAI-compatible model server.
+2. Copy config.env.example to config.env if custom settings are needed.
+3. Run:
+
+   ./run_outline.sh ../Query/Query_by_qwen.sql
+
+Output files:
+
+- runtime/outlines/<sql-file>.outline.json
+- runtime/outlines/<sql-file>.outline.txt
+

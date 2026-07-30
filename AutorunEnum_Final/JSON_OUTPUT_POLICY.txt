@@ -1,0 +1,73 @@
+AutorunEnum JSON output policy
+
+Rule:
+
+Human-facing files can stay txt or md.
+Machine-facing pipeline files should be JSON.
+
+Current split:
+
+- workspace/A/<query>.txt: human analysis view
+- workspace/A/<query>.json: machine analysis payload
+- workspace/rag/<query>.txt: human RAG view
+- workspace/rag/<query>.json: machine RAG payload
+- workspace/B/<query>-B.sql: executable SQL artifact
+- workspace/B/<query>-B.json: tuning metadata and raw LLM JSON result
+- workspace/validation/<query>.json: Oracle parse/explain/sample validation result
+- workspace/benchmark/<query>.json: benchmark result
+- workspace/critique/<query>/<critic>.json: machine critic report
+- workspace/critique/<query>/<critic>.txt: human critic view
+- workspace/feedback/<query>.json: compact feedback payload for Qwen retry
+- workspace/status.json: pipeline status
+- workspace/summary.json: final run summary
+
+LLM JSON contracts:
+
+Qwen tuner response:
+
+{"sql":"...","why":["..."],"risk":["..."],"check":["..."]}
+
+Critic response:
+
+{"ok":true,"risk":"low|medium|high","sum":"...","block":["..."],"fix":["..."],"sem":["..."],"bench":"..."}
+
+Contract files:
+
+- ../contracts/tuner_response.schema.json
+- ../contracts/critic_response.schema.json
+- ../contracts/db_catalog.schema.json
+- ../contracts/query_context.schema.json
+
+Runtime enforcement:
+
+- The prompt explains field meaning in English.
+- Compatible llama.cpp/vLLM requests receive response_format with the corresponding JSON Schema.
+- AutorunEnum validates the parsed object against the same schema after generation.
+- Invalid tuner JSON returns the original SQL and enters review/retry instead of treating prose as SQL.
+- Invalid critic JSON rejects the tuned candidate.
+- DwarfStar stays prompt-only unless CRITIC_<ALIAS>_STRUCTURED_OUTPUT=1 is explicitly tested and enabled.
+
+Dynamic DB context:
+
+- DB metadata is not embedded permanently in MasteryPrompt.txt or CriticPrompt.txt.
+- AutorunEnum selects relevant objects from ../db_context/catalog.json.
+- Optional per-query plan/bind data is loaded from ../db_context/queries/<SQL_ID>.json.
+- The selected content is supplied to both writer and critic as db_context.
+- The model never chooses or reads metadata files itself.
+
+Oracle validation feedback:
+
+{"oracle_validation":{"ok":false,"stage":"tuned_parse_explain|sample_compare|oracle_runtime","message":"...","errors":[{"code":"ORA-00904","offset":123,"message":"..."}],"rules":["..."]}}
+
+Why compact JSON:
+
+- deterministic parsing
+- easy feedback reuse
+- lower token overhead than Markdown sections
+- less brittle than delimiter-based text
+
+When something else is better:
+
+- JSONL is better for append-only multi-query logs or streaming events.
+- CSV/TSV is more token-efficient for flat metric tables, but weak for nested SQL feedback.
+- MessagePack/CBOR is byte-efficient for software, but not useful for LLM prompts because it is binary.

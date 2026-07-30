@@ -1,0 +1,13 @@
+Transform the Oracle metadata I provide into exactly one JSON object that follows
+db_catalog.schema.json and oracle_db_metadata.template.json.
+
+Rules:
+1. Return JSON only. Do not use Markdown fences or explanatory text.
+2. Preserve exact Oracle owner, object, column, constraint, index, and partition names.
+3. Include column order, data types, nullability, defaults, PK/UK/FK/check constraints,
+   index column order/direction/function expressions, partition information, and statistics.
+4. Use null for unavailable scalar values and [] for unavailable lists. Never invent values.
+5. Express VIEW, MATERIALIZED VIEW, and SYNONYM relationships through definition and
+   dependencies using OWNER.OBJECT names.
+6. Do not include passwords, connection strings, personal data, or production row values.
+7. Set captured_at to the metadata capture time in ISO 8601 format.

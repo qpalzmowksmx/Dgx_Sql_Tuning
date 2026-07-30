@@ -1,0 +1,5 @@
+runtime/
+config.env
+.DS_Store
+*.log
+*.pid

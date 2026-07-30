@@ -1,0 +1,80 @@
+AutorunEnum sequential critic workflow
+
+Purpose:
+
+Qwen is the primary SQL tuning writer.
+DeepSeek-V4-Flash-GGUF and Hy3 IQ1_M MTP are critic/analyzer models.
+They are not expected to run at the same time because each large model should own the DGX Spark memory budget.
+
+Target cycle:
+
+1. Qwen writes tuned SQL.
+2. DeepSeek critic reviews every tuned SQL and writes critique reports.
+3. Hy3 IQ1_M MTP performs the second independent review.
+4. Both critic reports are merged into workspace/feedback.
+5. Qwen reads the first candidate plus both critic reports and writes the final SQL.
+6. Oracle validation/benchmark runs when enabled.
+7. All Llamacpp model containers stop for idle standby.
+
+Execution:
+
+Use an OpenAI-compatible endpoint. The endpoint can stay the same while the loaded model changes.
+
+Example:
+
+CRITIC_MODELS=deepseek,hy3 AUTO_MODEL_SWAP=1 AUTO_STOP_MODELS=1 ./run_files.sh
+
+During the run:
+
+1. Qwen step:
+   - Start Qwen server on API_BASE_URL.
+   - Press Enter when the pipeline asks for the tuner model.
+
+2. DeepSeek critic step:
+   - Stop Qwen server to release VRAM.
+   - Start DeepSeek-V4-Flash-GGUF 2bit critic server on CRITIC_DEEPSEEK_API_BASE_URL.
+   - Press Enter.
+
+3. Hy3 critic step:
+   - Stop DeepSeek server.
+   - Start Hy3 IQ1_M MTP on CRITIC_HY3_API_BASE_URL.
+
+4. Feedback rewrite:
+   - Stop Hy3 and start Qwen again.
+   - Feed both critic JSON reports and the first Qwen candidate into Qwen.
+   - Save the final Qwen SQL and stop all models.
+
+Important environment values:
+
+API_BASE_URL=http://localhost:8080/v1
+API_KEY=your-local-api-key
+MODEL_NAME=qwen-sql-tuner
+
+CRITIC_MODELS=deepseek,hy3
+REQUIRE_CRITIC_APPROVAL=1
+AUTO_MODEL_SWAP=1
+AUTO_STOP_MODELS=1
+
+CRITIC_DEEPSEEK_API_BASE_URL=http://localhost:8080/v1
+CRITIC_DEEPSEEK_API_KEY=your-local-api-key
+CRITIC_DEEPSEEK_MODEL_NAME=deepseek-v4-flash
+
+CRITIC_HY3_API_BASE_URL=http://localhost:8080/v1
+CRITIC_HY3_API_KEY=your-local-api-key
+CRITIC_HY3_MODEL_NAME=hy3-iq1-m-mtp
+
+Output files:
+
+- workspace/critique/<query_name>/deepseek.json
+- workspace/critique/<query_name>/deepseek.txt
+- workspace/critique/<query_name>/hy3.json
+- workspace/critique/<query_name>/hy3.txt
+- workspace/validation/<query_name>.json
+- workspace/feedback/<query_name>.json
+- workspace/benchmark/<query_name>.json
+
+Decision rule:
+
+If REQUIRE_CRITIC_APPROVAL=1, every configured critic must return approved=true.
+Both critic reports are always returned to the final Qwen rewrite.
+If REQUIRE_ORACLE_VALIDATION=1, Oracle parse/explain/sample validation must also pass.

@@ -1,55 +1,92 @@
-# Prerequisites
-*.d
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.env
+!*.env.example
+config.env
+config.env.*
+!config.env.example
+!**/config.env.example
+credentials*
+secrets*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_ed25519*
 
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
+# Source areas intentionally excluded from the public repository
+old/
+**/old/
+DgxNvidiaBaseSetup/
+ForMac/
+GrafanaMonitoring/
+QueryBackUp/
+Query/
+AutorunEnum/
+AutorunEnum_4days/
+vLLM/
+Vllm/
+Data/
+add/
 
-# Linker output
-*.ilk
-*.map
-*.exp
+# SQL inputs, database context, generated work, and measurements
+*.sql
+!examples/**/*.example.sql
+db_context/catalog.json
+db_context/queries/
+workspace/
+workspace-*/
+workspace-BackUp/
+logs/
+**/logs/
+results/
+output/
+outputs/
+benchmark/
+**/benchmark/
+*.log
+*.jsonl
+*.csv
+*.parquet
 
-# Precompiled Headers
-*.gch
-*.pch
+# Models, containers, and large generated artifacts
+models/
+runtime/
+*.gguf
+*.safetensors
+*.bin
+*.tar
+*.tar.gz
+*.tar.zst
+*.zip
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
+# Python, editors, and operating-system files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.DS_Store
+._*
+.idea/
+.vscode/
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# debug information files
-*.dwo
+# Local exports, reports, and backups
+chat-export-*
+*.bak
+*.bak-*
+*.orig
+*.swp
+*~
+*.doc
+*.docx
+*.pdf
+*.png
