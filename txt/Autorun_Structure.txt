@@ -1,0 +1,83 @@
+Python
+│
+├── 1. Oracle 접속
+│
+├── 2. 1일간 SQL 수집
+│      ↓
+│   tmp/
+│      0001.sql
+│      0002.sql
+│      ...
+│
+├── 3. SQL 분석
+│      ↓
+│   A/
+│      0001.txt
+│      0002.txt
+│
+├── 4. 성능 데이터 수집
+│      ↓
+│   평균응답
+│   Buffer Gets
+│   Reads
+│   SQL_ID
+│   Plan Hash
+│
+├── 5. LLM 튜닝
+│      ↓
+│   B/
+│      0001-B.sql
+│      0001-B.json
+│
+├── 6. 자동 벤치마크
+│      ↓
+│   원본
+│   개선본
+│   비교
+│
+└── 7. 판정
+       │
+       ├── 성공
+       │      ↓
+       │  improved/
+       │
+       └── 실패
+              ↓
+         review/
+              ↓
+         사용자 승인
+              ↓
+         다시 3단계
+
+Working Directory
+
+workspace/
+
+A/             analysis text/JSON
+
+B/             tuned SQL/JSON
+
+rag/           selected DB context
+
+critique/      critic JSON/text views
+
+feedback/      compact retry JSON
+
+validation/    Oracle validation JSON
+
+benchmark/     performance JSON
+
+improved/
+
+review/
+
+failed/
+
+archive/
+
+# LEGACY DIRECTORY NAMES (disabled):
+# incoming/
+# analysis/
+# tuning/
+# approved/
+# retry/

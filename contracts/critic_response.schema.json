@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-sql.local/contracts/critic_response.schema.json",
+  "title": "Oracle SQL critic response",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "risk": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "sum": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400
+    },
+    "block": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "fix": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "sem": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "bench": {
+      "type": "string",
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "ok",
+    "risk",
+    "sum",
+    "block",
+    "fix",
+    "sem",
+    "bench"
+  ],
+  "additionalProperties": false
+}

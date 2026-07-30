@@ -1,0 +1,47 @@
+이 디렉토리는 Llamacpp/Qwen 전용 llama.cpp 실행 묶음입니다.
+
+DGX Spark에서 Qwen 공식 BF16 모델을 내려받고, llama.cpp의 llama-server를
+CUDA로 빌드한 뒤 Oracle SQL 튜닝 파이프라인이 호출할 OpenAI 호환 API 서버를
+띄웁니다.
+
+목표 흐름:
+
+1. DGX Spark에 필요한 빌드 도구와 Python 패키지 확인
+2. ggml-org/llama.cpp clone 또는 update
+3. CUDA 옵션으로 llama.cpp 빌드
+4. Qwen 공식 Hugging Face 모델 다운로드
+5. BF16 GGUF 파일로 변환
+6. llama-server 실행
+7. AutorunEnum에서 API_BASE_URL=http://DGX_HOST:8080/v1 로 연결
+
+중요:
+
+- 이 맥북에서 실행할 필요는 없습니다.
+- DGX Spark에서 git pull 후 Llamacpp/Qwen으로 들어가 실행하세요.
+- DGX에서는 Docker 경로를 권장합니다. 실행은 ./scripts/docker_run_all.sh 입니다.
+- 기본 MODEL_REPO는 공식 `Qwen/Qwen3.6-27B`이며 변경 시 모델/변환 호환성을 다시 검증합니다.
+- 쿼리 튜닝 용도라 KV cache는 16비트로 실행합니다.
+- Qwen 3.6 27B Thinking 공식 생성값은 temperature 0.6, top-p 0.95,
+  top-k 20, min-p 0, penalty 비활성입니다. 비교 가능한 반복 실행을 위해
+  기본 seed는 42로 고정합니다.
+- llama.cpp 빌드 버전에 따라 BF16 KV cache 지원 여부가 다를 수 있으므로,
+  기본값은 널리 지원되는 f16입니다. BF16 KV cache가 지원되는 빌드라면
+  config.env에서 KV_CACHE_TYPE=bf16 으로 바꾸세요.
+- Critic 모델은 `Llamacpp/DeepSeekV4FlashDgxSpark`와 `Llamacpp/Hy3`에서 실행합니다.
+
+Docker 실행 흐름:
+
+1. cp config.env.example config.env
+2. config.env에서 MODEL_REPO, LLAMA_CPP_REF 등을 확인
+3. ./scripts/docker_run_all.sh
+4. 서버 확인: ./scripts/docker_health_check.sh
+
+AutorunEnum은 enable_thinking=true와 같은 샘플러 값을 요청에도 명시하므로,
+OpenWebUI 기본 생성과 자동 SQL 튜닝이 동일한 프로필을 사용합니다.
+
+현재 서버/모델 조합에서 최적 온도를 실제 측정하려면 서버를 실행한 뒤
+`./scripts/07_temperature_benchmark.sh`를 사용합니다. 이 도구는 설정을 자동 변경하지
+않고 로컬 결과만 남기며, 결과 파일은 공개 저장소에 커밋하지 않습니다.
+
+Docker 컨테이너 안에는 /opt/llama.cpp가 빌드되어 있고, 모델과 GGUF 산출물은
+호스트의 runtime/ 아래에 저장됩니다.

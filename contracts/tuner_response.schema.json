@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-sql.local/contracts/tuner_response.schema.json",
+  "title": "Oracle SQL tuner response",
+  "type": "object",
+  "properties": {
+    "sql": {
+      "type": "string",
+      "minLength": 1
+    },
+    "why": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "check": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "sql",
+    "why",
+    "risk",
+    "check"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,57 @@
+Llamacpp/Qwen Docker 실행 메모
+
+권장 실행:
+
+1. 설정 파일 생성
+
+   cp config.env.example config.env
+
+2. 필요하면 config.env 수정
+
+   MODEL_REPO=Qwen/Qwen3.6-27B
+   LLAMA_CPP_REF=master
+   GGUF_OUTTYPE=bf16
+   KV_CACHE_TYPE=f16
+   TEMPERATURE=0.6
+   TOP_P=0.95
+   TOP_K=20
+   MIN_P=0.0
+   PRESENCE_PENALTY=0.0
+   FREQUENCY_PENALTY=0.0
+   REPETITION_PENALTY=1.0
+   SEED=42
+
+3. 전체 실행
+
+   ./scripts/docker_run_all.sh
+
+이 명령은 다음을 순서대로 수행합니다.
+
+1. Docker 이미지 빌드
+2. 컨테이너 안에서 Qwen 모델 다운로드
+3. 컨테이너 안에서 BF16 GGUF 변환
+4. 컨테이너 안에서 llama-server 실행
+
+서버만 다시 띄우기:
+
+   ./scripts/docker_start_server.sh
+
+컨테이너 shell 진입:
+
+   ./scripts/docker_shell.sh
+
+서버 헬스체크:
+
+   ./scripts/docker_health_check.sh
+
+docker compose로 실행:
+
+   ./scripts/docker_compose_up.sh
+
+주의:
+
+- DGX에 Docker와 NVIDIA Container Toolkit이 설치되어 있어야 합니다.
+- 모델과 GGUF 파일은 Llamacpp/Qwen/runtime/ 아래에 생깁니다.
+- runtime/은 git에 올라가지 않습니다.
+- 한번 성공한 뒤에는 runtime/llama.cpp가 아니라 Docker 이미지 안의 /opt/llama.cpp를 씁니다.
+- llama.cpp master로 성공한 뒤에는 runtime 없이도 재현되도록 config.env의 LLAMA_CPP_REF를 commit hash로 고정하는 것을 권장합니다.

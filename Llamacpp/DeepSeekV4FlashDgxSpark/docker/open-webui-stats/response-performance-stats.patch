@@ -1,0 +1,142 @@
+--- a/src/lib/components/chat/Messages/ResponseMessage.svelte
++++ b/src/lib/components/chat/Messages/ResponseMessage.svelte
+@@ -113,6 +113,7 @@
+ 			load_duration?: number;
+ 			usage?: unknown;
+ 		};
++		usage?: Record<string, unknown>;
+ 		annotation?: { type: string; rating: number };
+ 	}
+ 
+@@ -169,7 +170,86 @@
+ 
+ 	let model = null;
+ 	$: model = $models.find((m) => m.id === message.model);
++
++	type PerformanceStats = {
++		promptTokens: number | null;
++		completionTokens: number | null;
++		totalTokens: number | null;
++		promptRate: number | null;
++		completionRate: number | null;
++		contextLimit: number | null;
++	};
++
++	const firstFiniteNumber = (...values: unknown[]): number | null => {
++		for (const value of values) {
++			const parsed = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
++			if (typeof parsed === 'number' && Number.isFinite(parsed)) {
++				return parsed;
++			}
++		}
++		return null;
++	};
++
++	const buildPerformanceStats = (
++		usage: Record<string, unknown> | undefined,
++		model: any
++	): PerformanceStats | null => {
++		if (!usage) return null;
++
++		const promptTokens = firstFiniteNumber(
++			usage.input_tokens,
++			usage.prompt_tokens,
++			usage.prompt_eval_count,
++			usage.prompt_n
++		);
++		const completionTokens = firstFiniteNumber(
++			usage.output_tokens,
++			usage.completion_tokens,
++			usage.eval_count,
++			usage.predicted_n
++		);
++		const totalTokens = firstFiniteNumber(
++			usage.total_tokens,
++			promptTokens !== null && completionTokens !== null
++				? promptTokens + completionTokens
++				: null
++		);
++
++		const promptDuration = firstFiniteNumber(usage.prompt_eval_duration);
++		const completionDuration = firstFiniteNumber(usage.eval_duration);
++		const promptRate = firstFiniteNumber(
++			usage.prompt_per_second,
++			usage['prompt_token/s'],
++			promptTokens !== null && promptDuration !== null && promptDuration > 0
++				? promptTokens / (promptDuration / 1_000_000_000)
++				: null
++		);
++		const completionRate = firstFiniteNumber(
++			usage.predicted_per_second,
++			usage['response_token/s'],
++			completionTokens !== null && completionDuration !== null && completionDuration > 0
++				? completionTokens / (completionDuration / 1_000_000_000)
++				: null
++		);
+ 
++		const contextLimit = firstFiniteNumber(
++			model?.n_ctx,
++			model?.meta?.n_ctx,
++			model?.details?.n_ctx,
++			model?.openai?.n_ctx,
++			model?.openai?.meta?.n_ctx,
++			model?.info?.meta?.n_ctx,
++			model?.info?.meta?.details?.n_ctx
++		);
++
++		return { promptTokens, completionTokens, totalTokens, promptRate, completionRate, contextLimit };
++	};
++
++	const formatTokens = (value: number) => Math.round(value).toLocaleString();
++	const formatRate = (value: number) => value.toFixed(1);
++
++	$: performanceStats = buildPerformanceStats(message?.usage, model);
++
+ 	$: statusEntries = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
+ 	$: hasVisibleStatus =
+ 		(model?.info?.meta?.capabilities?.status_updates ?? true) &&
+@@ -867,6 +947,44 @@
+ 										updateChat();
+ 									}}
+ 								/>
++							{/if}
++
++							{#if message.done && performanceStats}
++								<div
++									data-testid="response-performance-stats"
++									class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400"
++								>
++									{#if performanceStats.promptTokens !== null}
++										<span title="Prompt processing (prefill)">
++											<span class="font-medium text-gray-600 dark:text-gray-300">Prefill</span>
++											{#if performanceStats.promptRate !== null}
++												{formatRate(performanceStats.promptRate)} tok/s ·
++											{/if}
++											{formatTokens(performanceStats.promptTokens)} tokens
++										</span>
++									{/if}
++
++									{#if performanceStats.completionTokens !== null}
++										<span title="Token generation (decode)">
++											<span class="font-medium text-gray-600 dark:text-gray-300">Decode</span>
++											{#if performanceStats.completionRate !== null}
++												{formatRate(performanceStats.completionRate)} tok/s ·
++											{/if}
++											{formatTokens(performanceStats.completionTokens)} tokens
++										</span>
++									{/if}
++
++									{#if performanceStats.totalTokens !== null}
++										<span title="Context usage after this response">
++											<span class="font-medium text-gray-600 dark:text-gray-300">Context</span>
++											{formatTokens(performanceStats.totalTokens)}
++											{#if performanceStats.contextLimit !== null}
++												/ {formatTokens(performanceStats.contextLimit)}
++											{/if}
++											tokens
++										</span>
++									{/if}
++								</div>
+ 							{/if}
+ 
+ 							{#if message?.error}

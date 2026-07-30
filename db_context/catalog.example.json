@@ -1,0 +1,50 @@
+{
+  "metadata_version": 1,
+  "captured_at": "2026-07-13T00:00:00+09:00",
+  "database": {
+    "version": "Oracle Database 19c",
+    "db_unique_name": "EXAMPLEDB",
+    "default_schema": "APP",
+    "optimizer_parameters": {},
+    "nls_parameters": {}
+  },
+  "objects": [
+    {
+      "owner": "APP",
+      "name": "ORDERS",
+      "object_type": "TABLE",
+      "columns": [
+        {
+          "name": "ORDER_ID",
+          "data_type": "NUMBER",
+          "precision": 19,
+          "scale": 0,
+          "nullable": false
+        }
+      ],
+      "constraints": [
+        {
+          "name": "PK_ORDERS",
+          "type": "PRIMARY KEY",
+          "columns": ["ORDER_ID"]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "PK_ORDERS",
+          "unique": true,
+          "columns": [
+            {"name": "ORDER_ID", "position": 1, "direction": "ASC"}
+          ]
+        }
+      ],
+      "partitions": [],
+      "statistics": {
+        "num_rows": null,
+        "last_analyzed": null
+      },
+      "definition": null,
+      "dependencies": []
+    }
+  ]
+}

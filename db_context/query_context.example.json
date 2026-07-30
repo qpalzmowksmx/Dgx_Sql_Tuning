@@ -1,0 +1,19 @@
+{
+  "captured_at": "2026-07-13T00:00:00+09:00",
+  "sql_id": "example_sql_id",
+  "child_number": 0,
+  "binds": [
+    {
+      "name": "station_id",
+      "oracle_type": "VARCHAR2",
+      "value": "STATION-EXAMPLE-001"
+    }
+  ],
+  "execution_plan": {
+    "format": "ALLSTATS LAST +PREDICATE +ALIAS +PEEKED_BINDS",
+    "text": []
+  },
+  "runtime_metrics": {},
+  "anonymized_samples": [],
+  "notes": []
+}

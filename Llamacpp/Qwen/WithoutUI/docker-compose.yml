@@ -1,0 +1,97 @@
+name: qwen
+
+services:
+  llamacpp-qwen-server:
+    image: ${DOCKER_IMAGE:-llamacpp-qwen-server:cuda}
+    pull_policy: never
+    container_name: ${DOCKER_CONTAINER:-llamacpp-qwen-server}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        CUDA_IMAGE: ${DOCKER_CUDA_IMAGE:-nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04}
+        LLAMA_CPP_REPO: ${LLAMA_CPP_REPO:-https://github.com/ggml-org/llama.cpp.git}
+        LLAMA_CPP_REF: ${LLAMA_CPP_REF:-b15ca938ad00aa6b3ee6c2edda7363fd02826b18}
+        CUDA_ARCHITECTURES: ${CUDA_ARCHITECTURES:-121-real}
+        BUILD_JOBS: ${BUILD_JOBS:-8}
+    env_file:
+      - path: ../config.env
+        required: false
+    volumes:
+      - ../:/workspace/llamacpp
+      - model-cache:/models
+      - llama-cache:/root/.cache/llama.cpp
+      - huggingface-cache:/root/.cache/huggingface
+    working_dir: /workspace/llamacpp
+    command:
+      - bash
+      - -lc
+      - |
+        mkdir -p "$${HF_MODEL_DIR}" "$$(dirname "$${GGUF_MODEL}")"
+        if [[ -z "$${HF_GGUF_MODEL_REF}" && ! -s "$${GGUF_MODEL}" ]]; then
+          /opt/venv/bin/hf download "$${MODEL_REPO}" \
+            --revision "$${MODEL_REVISION}" \
+            --local-dir "$${HF_MODEL_DIR}"
+          /opt/venv/bin/python /opt/llama.cpp/convert_hf_to_gguf.py "$${HF_MODEL_DIR}" \
+            --outfile "$${GGUF_MODEL}" \
+            --outtype "$${GGUF_OUTTYPE}"
+        fi
+        exec ./scripts/start_llama_server.sh
+    environment:
+      MODEL_FAMILY: ${MODEL_FAMILY:-qwen}
+      MODEL_DISPLAY_NAME: ${MODEL_DISPLAY_NAME:-Qwen llama.cpp SQL tuner}
+      SERVED_MODEL_NAME: ${SERVED_MODEL_NAME:-qwen-sql-tuner}
+      MODEL_REPO: ${MODEL_REPO:-Qwen/Qwen3.6-27B}
+      MODEL_REVISION: ${MODEL_REVISION:-main}
+      HF_GGUF_MODEL_REF: ${HF_GGUF_MODEL_REF-unsloth/Qwen3.6-27B-GGUF:BF16}
+      HF_MODEL_DIR: /models/qwen-hf
+      GGUF_MODEL: ${GGUF_MODEL:-runtime/models/qwen-27b-bf16.gguf}
+      GGUF_OUTTYPE: ${GGUF_OUTTYPE:-bf16}
+      WORK_DIR: /workspace/llamacpp/runtime
+      LLAMA_CPP_DIR: /opt/llama.cpp
+      HOST: 0.0.0.0
+      PORT: ${PORT:-8080}
+      CTX_SIZE: ${CTX_SIZE:-131072}
+      N_GPU_LAYERS: ${N_GPU_LAYERS:-999}
+      PARALLEL: ${PARALLEL:-1}
+      BATCH_SIZE: ${BATCH_SIZE:-2048}
+      UBATCH_SIZE: ${UBATCH_SIZE:-512}
+      THREADS: ${THREADS:-16}
+      FLASH_ATTN: ${FLASH_ATTN:-1}
+      KV_CACHE_TYPE: ${KV_CACHE_TYPE:-f16}
+      KV_CACHE_TYPE_K: ${KV_CACHE_TYPE_K:-f16}
+      KV_CACHE_TYPE_V: ${KV_CACHE_TYPE_V:-f16}
+      LLAMA_SERVER_EXTRA_ARGS: ${LLAMA_SERVER_EXTRA_ARGS:---metrics}
+      START_SERVER: ${START_SERVER:-1}
+      HF_HOME: /root/.cache/huggingface
+      HF_TOKEN: ${HF_TOKEN:-}
+    gpus:
+      - driver: nvidia
+        count: all
+        capabilities:
+          - gpu
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    init: true
+    restart: ${RESTART_POLICY:-unless-stopped}
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:$${PORT}/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 3h
+
+volumes:
+  llama-cache:
+    name: ${DOCKER_LLAMA_CACHE_VOLUME:-llamacpp-qwen-llama-cache}
+  model-cache:
+    name: ${DOCKER_MODEL_VOLUME:-llamacpp-qwen-models}
+  huggingface-cache:
+    name: ${DOCKER_HF_CACHE_VOLUME:-llamacpp-qwen-huggingface-cache}
+
+networks:
+  default:
+    internal: ${DOCKER_INTERNAL_NETWORK:-true}

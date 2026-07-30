@@ -1,0 +1,3 @@
+catalog.json
+queries/*.json
+!queries/.gitkeep

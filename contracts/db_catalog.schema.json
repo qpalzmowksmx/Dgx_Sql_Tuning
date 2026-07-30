@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-sql.local/contracts/db_catalog.schema.json",
+  "title": "Oracle database metadata catalog",
+  "type": "object",
+  "properties": {
+    "metadata_version": {
+      "type": "integer"
+    },
+    "captured_at": {
+      "type": "string"
+    },
+    "database": {
+      "type": "object"
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string"},
+          "name": {"type": "string"},
+          "object_type": {"type": "string"},
+          "columns": {"type": "array"},
+          "constraints": {"type": "array"},
+          "indexes": {"type": "array"},
+          "partitions": {"type": "array"},
+          "statistics": {"type": "object"},
+          "definition": {"type": ["string", "null"]},
+          "dependencies": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        },
+        "required": ["name", "object_type"],
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": ["metadata_version", "captured_at", "database", "objects"],
+  "additionalProperties": false
+}

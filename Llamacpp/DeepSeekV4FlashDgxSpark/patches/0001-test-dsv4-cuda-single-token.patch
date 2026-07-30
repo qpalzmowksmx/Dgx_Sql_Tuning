@@ -1,0 +1,22 @@
+diff --git a/tests/test-backend-ops.cpp b/tests/test-backend-ops.cpp
+index a0b09cb8..fc026bcd 100644
+--- a/tests/test-backend-ops.cpp
++++ b/tests/test-backend-ops.cpp
+@@ -9341,11 +9341,17 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
+ 
+     // V4-port: dsv4_hc_weighted_sum test cases (n_embd, n_hc, n_tokens).
++    // Single-token cases exercise the autoregressive decode shape used by llama-server.
++    test_cases.emplace_back(new test_dsv4_hc_weighted_sum(128,  4, 1));
++    test_cases.emplace_back(new test_dsv4_hc_weighted_sum(4096, 4, 1));
+     test_cases.emplace_back(new test_dsv4_hc_weighted_sum(128, 4, 16));
+     test_cases.emplace_back(new test_dsv4_hc_weighted_sum(512, 4, 32));
+     test_cases.emplace_back(new test_dsv4_hc_weighted_sum(64,  8, 8));
+ 
+     // V4-port: dsv4_hc_expand test cases (n_embd, n_hc, n_tokens).
++    // Cover both a small tensor and DeepSeek V4's full hidden width at decode batch 1.
++    test_cases.emplace_back(new test_dsv4_hc_expand(128,  4, 1));
++    test_cases.emplace_back(new test_dsv4_hc_expand(4096, 4, 1));
+     test_cases.emplace_back(new test_dsv4_hc_expand(128, 4, 16));
+     test_cases.emplace_back(new test_dsv4_hc_expand(512, 4, 32));
+     test_cases.emplace_back(new test_dsv4_hc_expand(64,  8, 8));
+ 

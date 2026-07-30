@@ -1,0 +1,47 @@
+Oracle validation loop
+
+Purpose:
+
+Model critique is not enough for final SQL stability.
+Every tuned SQL must pass Oracle-side validation before it can be reported as verified.
+
+Safe loop:
+
+1. Qwen creates tuned SQL.
+2. DeepSeek 2bit critic reviews the SQL.
+3. If possible, a BF16 or 8bit+ model performs second critic review.
+4. Oracle validates the tuned SQL with parse and EXPLAIN PLAN.
+5. If Oracle returns an ORA error, the ORA code, offset, and message are written to feedback JSON.
+6. EXPLAIN PLAN rejects tuned plans containing TEMP TABLE TRANSFORMATION, LOAD AS SELECT, or CURSOR DURATION MEMORY.
+7. Explicit MATERIALIZED/MATERIALIZE/RESULT_CACHE usage is rejected before execution.
+8. Original and tuned SQL are executed with a small row limit inside the same read-only transaction.
+9. Limited row count, column names, ordered hash, unordered hash, and sample rows are compared.
+10. Original/tuned execution time is benchmarked against the same read-only snapshot.
+11. Only SQL that passes critic requirements, Oracle validation, and benchmark criteria is marked verified.
+
+Prompt rules:
+
+- SQL 외 설명문을 SQL 코드 안에 넣지 말 것
+- Oracle 19c 기준 문법만 사용할 것
+- 같은 SELECT 절에서 alias 재참조 금지
+- ROWNUM = 1 ORDER BY 금지
+- 집계 alias는 바깥 SELECT에서만 사용
+- CTE별 예상 row 증가 원인은 JSON why/risk/check에 설명
+- 실행 전 EXPLAIN PLAN 통과를 목표로 작성
+- 원본 결과와 row count/hash/주요 컬럼 샘플 비교 가능하게 작성
+- MATERIALIZED, MATERIALIZE hint, RESULT_CACHE 사용 금지
+- TEMP TABLE TRANSFORMATION, LOAD AS SELECT, CURSOR DURATION MEMORY 실행 계획 금지
+- 원본/튜닝 결과는 동일 read-only transaction 또는 동일 SCN에서 비교
+
+Output:
+
+- workspace/validation/<query>.json
+- workspace/feedback/<query>.json
+- workspace/benchmark/<query>.json
+
+Decision rule:
+
+When REQUIRE_ORACLE_VALIDATION=1, oracle_validation_passed must be true.
+If parse, EXPLAIN PLAN, materialization-plan checks, same-snapshot sample row count,
+column list, or unordered row hash fails,
+the SQL is not moved to improved/ and returns to the retry loop.

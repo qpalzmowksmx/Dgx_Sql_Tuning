@@ -1,0 +1,126 @@
+services:
+  deepseek-v4-flash-dgx-spark:
+    image: ${DOCKER_IMAGE:-llm-sql-dsv4-iq3xxs-dgx-spark:cuda13}
+    container_name: ${DOCKER_CONTAINER:-llm-sql-dsv4-iq3xxs-dgx-spark}
+
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        CUDA_IMAGE: ${CUDA_IMAGE:-nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04}
+
+        LLAMA_CPP_REPO: ${LLAMA_CPP_REPO:-https://github.com/satindergrewal/llama.cpp.git}
+        LLAMA_CPP_BRANCH: ${LLAMA_CPP_BRANCH:-deepseek-v4-flash}
+        LLAMA_CPP_REF: ${LLAMA_CPP_REF:-7a02824e968f2ce85ad919169962e0020595d141}
+
+        CUDA_ARCHITECTURES: ${CUDA_ARCHITECTURES:-121a-real}
+        GGML_CUDA_FA_ALL_QUANTS: ${GGML_CUDA_FA_ALL_QUANTS:-1}
+        GGML_NATIVE: ${GGML_NATIVE:-1}
+
+    env_file:
+      - path: ./config.env
+        required: false
+
+    environment:
+      LLAMA_CPP_DIR: /opt/llama.cpp
+      LD_LIBRARY_PATH: /usr/local/nvidia/lib64:/usr/local/nvidia/lib:/usr/local/cuda/lib64
+
+      MODEL_CACHE_DIR: /root/.cache/llama.cpp
+      LLAMA_CACHE: /root/.cache/llama.cpp
+      HF_HOME: /root/.cache/huggingface
+      GGUF_MODEL: ${GGUF_MODEL:-}
+
+      HOST: 0.0.0.0
+      PORT: ${PORT:-8080}
+
+      CUDA_VISIBLE_DEVICES: "0"
+
+      GGML_CUDA_ENABLE_UNIFIED_MEMORY: ${GGML_CUDA_ENABLE_UNIFIED_MEMORY:-1}
+      GGML_OP_OFFLOAD_MIN_BATCH: ${GGML_OP_OFFLOAD_MIN_BATCH:-32}
+
+      PYTHONUNBUFFERED: "1"
+
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:${PORT:-8080}"
+
+    volumes:
+      - ./scripts:/opt/dsv4-dgx-wrapper/scripts:ro
+      - model-cache:/root/.cache/llama.cpp
+      - huggingface-cache:/root/.cache/huggingface
+      - ${LOCAL_GGUF_DIR:-./runtime/local-gguf}:/models:ro
+
+    gpus:
+      - driver: nvidia
+        count: all
+        capabilities:
+          - gpu
+
+    ipc: host
+    shm_size: ${SHM_SIZE:-16gb}
+
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+
+      stack:
+        soft: 67108864
+        hard: 67108864
+
+      nofile:
+        soft: 1048576
+        hard: 1048576
+
+    restart: ${RESTART_POLICY:-unless-stopped}
+    stop_grace_period: 2m
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl --fail --silent --show-error
+          http://127.0.0.1:$${PORT:-8080}/v1/models
+          >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 2h
+
+
+  open-webui:
+    image: ${OPEN_WEBUI_IMAGE:-llm-sql-open-webui:v0.9.4-dgx-stats}
+    container_name: ${OPEN_WEBUI_CONTAINER:-llm-sql-open-webui}
+    build:
+      context: ../docker/open-webui-stats
+      dockerfile: Dockerfile
+      args:
+        OPEN_WEBUI_BASE: ${OPEN_WEBUI_BASE:-ghcr.io/open-webui/open-webui:v0.9.4}
+        OPEN_WEBUI_REPO: ${OPEN_WEBUI_REPO:-https://github.com/open-webui/open-webui.git}
+        OPEN_WEBUI_REF: ${OPEN_WEBUI_REF:-f51d2b026f1b0e7283b15f093412be8b67d24770}
+    depends_on:
+      deepseek-v4-flash-dgx-spark:
+        condition: service_healthy
+    env_file:
+      - path: ./open-webui.env
+        required: false
+    environment:
+      ENABLE_OLLAMA_API: "false"
+      OPENAI_API_BASE_URLS: http://deepseek-v4-flash-dgx-spark:8080/v1
+      OPENAI_API_KEYS: ${OPENAI_API_KEY:-your-local-api-key}
+      DEFAULT_MODELS: ${SERVED_MODEL_NAME:-deepseek-v4-flash-iq3-xxs}
+      DEFAULT_PINNED_MODELS: ${SERVED_MODEL_NAME:-deepseek-v4-flash-iq3-xxs}
+    ports:
+      - "${OPEN_WEBUI_BIND_ADDRESS:-127.0.0.1}:${OPEN_WEBUI_PORT:-3000}:8080"
+    volumes:
+      - open-webui-data:/app/backend/data
+    restart: ${RESTART_POLICY:-unless-stopped}
+
+volumes:
+  open-webui-data:
+    name: ${OPEN_WEBUI_DATA_VOLUME:-llm-sql-open-webui-data}
+
+  model-cache:
+    name: ${DOCKER_MODEL_CACHE_VOLUME:-llm-sql-dsv4-iq3xxs-dgx-spark-cache}
+
+  huggingface-cache:
+    name: ${DOCKER_HF_CACHE_VOLUME:-llm-sql-dsv4-iq3xxs-dgx-spark-hf-cache}
