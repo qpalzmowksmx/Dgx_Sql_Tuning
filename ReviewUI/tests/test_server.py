@@ -112,6 +112,49 @@ class ReviewDataTests(unittest.TestCase):
         self.assertNotIn("secret", detail["original_sql"])
         self.assertIn("SELECT *", detail["original_sql"])
 
+    def test_reports_missing_original_sql_instead_of_silently_hiding_it(self) -> None:
+        (self.workspace / "tmp" / "job_one.sql").unlink()
+        detail = self.data.get_query(".", "job_one")
+        self.assertEqual(detail["original_sql"], "")
+        self.assertTrue(
+            any("Artifact not found" in error for error in detail["errors"])
+        )
+
+    def test_uses_configured_validation_path_and_merges_live_status(self) -> None:
+        custom_path = self.workspace / "validation" / "custom-result.json"
+        self.job["validation_path"] = str(custom_path)
+        self.job["validation"] = {
+            "passed": False,
+            "steps": {"original": {"parse": {"ok": True}}},
+        }
+        self._write_json("status.json", [self.job])
+        self._write_json(
+            "validation/custom-result.json",
+            {
+                "passed": True,
+                "sample_compare": {
+                    "passed": True,
+                    "original": {"row_count": 10, "elapsed_ms": 12.5},
+                    "tuned": {"row_count": 10, "elapsed_ms": 8.0},
+                },
+            },
+        )
+        detail = self.data.get_query(".", "job_one")
+        self.assertTrue(detail["validation"]["passed"])
+        self.assertTrue(detail["validation"]["steps"]["original"]["parse"]["ok"])
+        self.assertEqual(
+            detail["validation"]["sample_compare"]["tuned"]["row_count"],
+            10,
+        )
+
+    def test_surfaces_oracle_summary_when_detail_artifact_is_absent(self) -> None:
+        (self.workspace / "validation" / "job_one.json").unlink()
+        self.job["validation"] = {}
+        self._write_json("status.json", [self.job])
+        detail = self.data.get_query(".", "job_one")
+        self.assertTrue(detail["validation"]["passed"])
+        self.assertEqual(detail["validation"]["source"], "benchmark_summary")
+
 
 if __name__ == "__main__":
     unittest.main()

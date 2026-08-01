@@ -9,7 +9,6 @@
 저장소 루트에서 실행합니다.
 
 ```bash
-python3 -m pip install -r ReviewUI/requirements.txt
 python3 ReviewUI/server.py
 ```
 
@@ -34,8 +33,10 @@ python3 ReviewUI/server.py --workspace /absolute/path/to/workspace
 - writer와 critic에 실제 주입된 `db_context`
 - 문제 확인을 위한 원본 JSON 탭
 
-화면은 5초마다 자동 갱신됩니다. 외부 CDN이나 JavaScript package는 사용하지 않습니다.
-Python 의존성은 폐쇄망으로 이동하기 전에 `requirements.txt`에 맞춰 준비하세요.
+화면은 5초마다 현재 스크롤 위치를 보존하면서 자동 갱신됩니다. 외부 CDN,
+JavaScript package, 필수 추가 Python package를 사용하지 않으므로 폐쇄망에서도
+Python 3만으로 실행할 수 있습니다. `prometheus-client`가 설치되어 있으면 `/metrics`
+관측값도 제공하고, 설치되지 않았으면 리뷰 화면만 정상 동작합니다.
 
 ## 보안 경계
 
