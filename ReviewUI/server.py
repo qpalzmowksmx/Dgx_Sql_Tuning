@@ -14,7 +14,35 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+try:
+    from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        Counter,
+        Histogram,
+        generate_latest,
+    )
+except ImportError:
+    # ReviewUI itself has no mandatory third-party dependency. Metrics become a
+    # no-op endpoint when prometheus-client is not installed.
+    CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+
+    class _NoopMetric:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def labels(self, **_labels: Any) -> "_NoopMetric":
+            return self
+
+        def inc(self) -> None:
+            pass
+
+        def observe(self, _value: float) -> None:
+            pass
+
+    Counter = Histogram = _NoopMetric
+
+    def generate_latest() -> bytes:
+        return b"# prometheus_client is not installed; ReviewUI metrics are disabled.\n"
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -114,7 +142,38 @@ class ReviewData:
             candidate = self._safe_file(run_root, fallback)
         if candidate is None:
             return "", "Artifact path is outside the selected run."
+        if not candidate.is_file():
+            return "", f"Artifact not found: {fallback.name}"
         return self._read_text(candidate)
+
+    def _artifact_json(
+        self,
+        run_root: Path,
+        configured_path: Any,
+        fallback: Path,
+    ) -> tuple[Any, str | None]:
+        candidate: Path | None = None
+        if isinstance(configured_path, str) and configured_path.strip():
+            raw = Path(configured_path)
+            candidate = raw if raw.is_absolute() else run_root / raw
+            candidate = self._safe_file(run_root, candidate)
+        if candidate is None or not candidate.is_file():
+            candidate = self._safe_file(run_root, fallback)
+        if candidate is None or not candidate.is_file():
+            return {}, None
+        return self._read_json(candidate, {})
+
+    @classmethod
+    def _merge_dicts(cls, base: Any, override: Any) -> dict[str, Any]:
+        merged = dict(base) if isinstance(base, dict) else {}
+        if not isinstance(override, dict):
+            return merged
+        for key, value in override.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = cls._merge_dicts(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
 
     def _jobs(self, run_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
         errors: list[str] = []
@@ -305,17 +364,33 @@ class ReviewData:
         if error:
             errors.append(error)
 
-        artifact_paths = {
-            "analysis": run_root / "A" / f"{query_name}.json",
-            "tuning": run_root / "B" / f"{query_name}-B.json",
-            "validation": run_root / "validation" / f"{query_name}.json",
-            "benchmark": run_root / "benchmark" / f"{query_name}.json",
-            "feedback": run_root / "feedback" / f"{query_name}.json",
-            "rag": run_root / "rag" / f"{query_name}.json",
+        artifact_specs = {
+            "analysis": (
+                job.get("analysis_path"),
+                run_root / "A" / f"{query_name}.json",
+            ),
+            "tuning": (None, run_root / "B" / f"{query_name}-B.json"),
+            "validation": (
+                job.get("validation_path"),
+                run_root / "validation" / f"{query_name}.json",
+            ),
+            "benchmark": (
+                job.get("benchmark_path"),
+                run_root / "benchmark" / f"{query_name}.json",
+            ),
+            "feedback": (
+                job.get("feedback_path"),
+                run_root / "feedback" / f"{query_name}.json",
+            ),
+            "rag": (None, run_root / "rag" / f"{query_name}.json"),
         }
         artifacts: dict[str, Any] = {}
-        for key, path in artifact_paths.items():
-            payload, error = self._read_json(path, {})
+        for key, (configured_path, fallback) in artifact_specs.items():
+            payload, error = self._artifact_json(
+                run_root,
+                configured_path,
+                fallback,
+            )
             artifacts[key] = payload if isinstance(payload, (dict, list)) else {}
             if error:
                 errors.append(error)
@@ -338,12 +413,23 @@ class ReviewData:
             for name, report in raw_critics.items()
         }
 
-        validation = artifacts["validation"] or (
-            job.get("validation") if isinstance(job.get("validation"), dict) else {}
+        validation = self._merge_dicts(
+            job.get("validation"),
+            artifacts["validation"],
         )
-        benchmark = artifacts["benchmark"] or (
-            job.get("benchmark") if isinstance(job.get("benchmark"), dict) else {}
+        benchmark = self._merge_dicts(
+            job.get("benchmark"),
+            artifacts["benchmark"],
         )
+        if not validation and "oracle_validation_passed" in benchmark:
+            validation = {
+                "passed": benchmark.get("oracle_validation_passed"),
+                "message": (
+                    "Oracle 검증 요약만 있습니다. 상세 validation 산출물이 아직 "
+                    "생성되지 않았거나 선택한 실행 기록에 보관되지 않았습니다."
+                ),
+                "source": "benchmark_summary",
+            }
         tuning = artifacts["tuning"] if isinstance(artifacts["tuning"], dict) else {}
         rag = artifacts["rag"] if isinstance(artifacts["rag"], dict) else {}
 

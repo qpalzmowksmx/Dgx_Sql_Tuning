@@ -8,6 +8,7 @@ const state = {
   detail: null,
   activeTab: "overview",
   search: "",
+  refreshing: false,
 };
 
 const tabs = [
@@ -112,8 +113,10 @@ async function loadRuns({ preserve = true } = {}) {
 
 async function loadRun(runId, { preserveQuery = false } = {}) {
   state.selectedRun = runId;
-  state.run = await fetchJson(`/api/run?run=${encodeURIComponent(runId)}`);
-  const jobs = state.run.jobs || [];
+  const run = await fetchJson(`/api/run?run=${encodeURIComponent(runId)}`);
+  if (state.selectedRun !== runId) return;
+  state.run = run;
+  const jobs = run.jobs || [];
   if (!preserveQuery || !jobs.some((job) => job.name === state.selectedQuery)) {
     state.selectedQuery = jobs[0]?.name || null;
     state.detail = null;
@@ -125,9 +128,12 @@ async function loadRun(runId, { preserveQuery = false } = {}) {
 
 async function loadQuery(name) {
   state.selectedQuery = name;
-  state.detail = await fetchJson(
-    `/api/query?run=${encodeURIComponent(state.selectedRun)}&name=${encodeURIComponent(name)}`,
+  const runId = state.selectedRun;
+  const detail = await fetchJson(
+    `/api/query?run=${encodeURIComponent(runId)}&name=${encodeURIComponent(name)}`,
   );
+  if (state.selectedRun !== runId || state.selectedQuery !== name) return;
+  state.detail = detail;
   renderQueryList();
   renderDetail();
 }
@@ -344,6 +350,8 @@ function diffLines(original, tuned) {
 
 function renderSql() {
   const detail = state.detail;
+  const originalMissing = !String(detail.original_sql || "").trim();
+  const tunedMissing = !String(detail.tuned_sql || "").trim();
   const rows = diffLines(detail.original_sql, detail.tuned_sql);
   let leftNumber = 0;
   let rightNumber = 0;
@@ -353,6 +361,8 @@ function renderSql() {
     return { left, right, kind, leftNumber: left === null ? "" : leftNumber, rightNumber: right === null ? "" : rightNumber };
   });
   return `
+    ${originalMissing ? '<div class="notice error"><strong>원본 SQL을 읽지 못했습니다.</strong> 현재 실행의 tmp 디렉터리와 원본 파일 권한을 확인하세요.</div>' : ""}
+    ${tunedMissing ? '<div class="notice warning"><strong>튜닝 SQL이 아직 없습니다.</strong> Writer 단계가 끝난 뒤 자동으로 표시됩니다.</div>' : ""}
     <div class="sql-toolbar">
       <div><strong>줄 단위 비교</strong><span class="muted">초록색은 추가, 붉은색은 제거된 줄입니다.</span></div>
       <div><button class="button secondary copy-button" data-copy="tuned" type="button">튜닝 SQL 복사</button></div>
@@ -393,13 +403,28 @@ function renderCritics() {
 }
 
 function oracleHighlights(report = {}) {
+  const sample = report.sample_compare || {};
+  const original = sample.original || {};
+  const tuned = sample.tuned || {};
+  const checks = sample.checks || {};
   return [
     ["전체 판정", report.passed],
     ["실패 단계", report.failed_stage],
-    ["원본 Parse/Plan", report.steps?.original?.ok],
-    ["튜닝 Parse/Plan", report.steps?.tuned?.ok],
+    ["검증 시각", report.checked_at],
+    ["원본 Parse", report.steps?.original?.parse?.ok],
+    ["원본 Explain", report.steps?.original?.explain?.ok],
+    ["튜닝 Parse", report.steps?.tuned?.parse?.ok],
+    ["튜닝 Explain", report.steps?.tuned?.explain?.ok],
     ["동일 스냅샷", report.snapshot?.same_snapshot],
-    ["표본 동일성", report.sample_compare?.passed],
+    ["실행 결과 동일", sample.passed],
+    ["컬럼 동일", checks.columns_match],
+    ["행 수 동일", checks.limited_row_count_match],
+    ["결과 해시 동일", checks.unordered_hash_match],
+    ["원본 행 수", original.row_count],
+    ["튜닝 행 수", tuned.row_count],
+    ["원본 실행 시간", original.elapsed_ms === undefined ? null : `${formatNumber(original.elapsed_ms, 4)} ms`],
+    ["튜닝 실행 시간", tuned.elapsed_ms === undefined ? null : `${formatNumber(tuned.elapsed_ms, 4)} ms`],
+    ["전체 결과 비교", checks.complete_results],
     ["표본 행 제한", report.row_limit],
     ["메시지", report.message],
   ];
@@ -477,27 +502,105 @@ function renderKeyValues(object) {
   return `<dl class="key-values">${entries.map(([key, value]) => `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(typeof value === "object" ? JSON.stringify(value) : displayValue(value))}</dd></div>`).join("")}</dl>`;
 }
 
+async function copyText(content) {
+  const text = String(content || "");
+  if (!text) throw new Error("복사할 내용이 없습니다.");
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Some browsers expose the API but deny it without an explicit permission.
+    }
+  }
+
+  // `execCommand("copy")` can return true without transferring textarea
+  // contents on some Firefox/Linux builds. Supplying the copy event payload
+  // explicitly keeps the fallback reliable in those browsers.
+  let eventCopied = false;
+  const handleCopy = (event) => {
+    if (!event.clipboardData) return;
+    event.clipboardData.setData("text/plain", text);
+    event.preventDefault();
+    eventCopied = true;
+  };
+  document.addEventListener("copy", handleCopy, { once: true });
+  const eventCommandCopied = document.execCommand("copy");
+  document.removeEventListener("copy", handleCopy);
+  if (eventCommandCopied && eventCopied) return;
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("브라우저가 복사를 허용하지 않았습니다.");
+}
+
 function bindCopyButtons() {
   $("#detail-content").querySelectorAll("[data-copy]").forEach((button) => {
     button.addEventListener("click", async () => {
       const content = button.dataset.copy === "tuned" ? state.detail.tuned_sql : JSON.stringify(state.detail.raw, null, 2);
       try {
-        await navigator.clipboard.writeText(content || "");
+        await copyText(content);
         showToast("클립보드에 복사했습니다.");
-      } catch {
-        showToast("복사하지 못했습니다.");
+      } catch (error) {
+        showToast(error.message || "복사하지 못했습니다.");
       }
     });
   });
 }
 
+function captureScrollState() {
+  return {
+    pageX: window.scrollX,
+    pageY: window.scrollY,
+    sidebar: $(".sidebar")?.scrollTop || 0,
+    codePanels: Array.from(document.querySelectorAll(".code-lines, .json-view"))
+      .map((element) => ({ left: element.scrollLeft, top: element.scrollTop })),
+  };
+}
+
+function restoreScrollState(snapshot) {
+  const root = document.documentElement;
+  const previousBehavior = root.style.scrollBehavior;
+  root.style.scrollBehavior = "auto";
+  window.scrollTo(snapshot.pageX, snapshot.pageY);
+  const sidebar = $(".sidebar");
+  if (sidebar) sidebar.scrollTop = snapshot.sidebar;
+  document.querySelectorAll(".code-lines, .json-view").forEach((element, index) => {
+    const saved = snapshot.codePanels[index];
+    if (saved) {
+      element.scrollLeft = saved.left;
+      element.scrollTop = saved.top;
+    }
+  });
+  root.style.scrollBehavior = previousBehavior;
+}
+
 async function refresh({ quiet = false } = {}) {
+  if (state.refreshing) return;
+  state.refreshing = true;
+  const scrollState = quiet ? captureScrollState() : null;
   try {
     showError("");
     await loadRuns({ preserve: true });
     if (!quiet) showToast("최신 결과를 불러왔습니다.");
   } catch (error) {
     showError(`결과를 불러오지 못했습니다: ${error.message}`);
+  } finally {
+    if (scrollState) {
+      requestAnimationFrame(() => restoreScrollState(scrollState));
+    }
+    state.refreshing = false;
   }
 }
 
