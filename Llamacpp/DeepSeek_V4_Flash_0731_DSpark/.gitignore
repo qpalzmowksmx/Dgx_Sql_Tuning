@@ -1,0 +1,8 @@
+config.env
+open-webui.env
+models/*.gguf
+vendor/ds4-src/
+logs/
+*.log
+*.pid
+.DS_Store

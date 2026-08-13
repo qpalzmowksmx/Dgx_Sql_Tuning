@@ -14,9 +14,10 @@ _프로젝트의 데이터 흐름을 표현한 개념 일러스트입니다._
 DGX SQL Tuning은 민감한 SQL과 데이터베이스 메타데이터를 내부 환경에 유지하면서
 Oracle SQL 튜닝 과정을 자동화하기 위해 만든 포트폴리오 프로젝트입니다.
 
-Qwen이 튜닝 초안을 작성하고 DeepSeek V4 Flash와 Hy3가 독립적으로 결과를
-비평합니다. 모델이 승인한 SQL도 곧바로 채택하지 않고 Oracle parse, 실행계획,
-결과 동등성, 성능 측정을 통과한 경우에만 성공으로 판정합니다.
+Qwen이 튜닝 초안을 작성하고 Hy3가 비평한 뒤, DeepSeek V4 Flash 0731이
+최종 SQL을 다시 작성하고 Hy3가 한 번 더 검토합니다. 모델이 승인한 SQL도 곧바로
+채택하지 않고 Oracle parse, 실행계획, 결과 동등성, 성능 측정을 통과한 경우에만
+최종 성공으로 판정할 수 있습니다.
 
 파일 기반 오프라인 분석과 Oracle `V$SQL` 수집 모드를 모두 지원하며, 대형 모델을
 동시에 적재하기 어려운 단일 DGX 환경을 고려해 모델을 순차적으로 교체할 수 있도록
@@ -25,12 +26,14 @@ Qwen이 튜닝 초안을 작성하고 DeepSeek V4 Flash와 Hy3가 독립적으�
 ## 핵심 구현
 
 - **다중 모델 검증 루프**
-  Qwen writer가 SQL을 재작성하고 DeepSeek·Hy3 critic이 의미 보존, Oracle 문법,
-  카디널리티 증가, DB Link 및 scalar subquery 위험을 독립적으로 검토합니다.
+  Qwen writer → Hy3 critic → DeepSeek 0731 final writer → Hy3 final review 순서로
+  의미 보존, Oracle 문법, 카디널리티 증가, DB Link 및 scalar subquery 위험을
+  단계별로 검토합니다.
 
-- **Fail-closed 파이프라인**
-  모델 응답, JSON Schema, Oracle 검증 또는 최종 gate 중 하나라도 실패하면 결과를
-  자동 승인하지 않습니다.
+- **선택 가능한 Oracle 검증 정책**
+  `run_files.sh`는 Oracle 접속이 가능하면 검증하고, 접속할 수 없으면 모델 전용
+  모드로 계속할 수 있습니다. `run_oracle.sh` 또는
+  `REQUIRE_ORACLE_VALIDATION=1`은 검증 실패 시 중단하는 fail-closed 정책입니다.
 
 - **Oracle 기반 최종 검증**
   선택적으로 parse, `EXPLAIN PLAN`, 동일 트랜잭션 내 원본·튜닝 결과 비교,
@@ -54,10 +57,9 @@ Qwen이 튜닝 초안을 작성하고 DeepSeek V4 Flash와 Hy3가 독립적으�
 flowchart LR
     A["SQL 입력<br/>파일 또는 Oracle V$SQL"] --> B["정적 분석<br/>메타데이터 선택"]
     B --> C["Qwen Writer<br/>튜닝 SQL 생성"]
-    C --> D["DeepSeek Critic"]
-    C --> E["Hy3 Critic"]
-    D --> F{"Critic 승인"}
-    E --> F
+    C --> D["Hy3 Critic<br/>초안 비평"]
+    D --> E["DeepSeek 0731 Final Writer<br/>최종 SQL 재작성"]
+    E --> F["Hy3 Final Review"]
     F -- "피드백" --> B
     F -- "승인" --> G["Oracle 검증<br/>Parse · Plan · 결과 비교"]
     G --> H["반복 벤치마크"]
@@ -67,7 +69,9 @@ flowchart LR
 
     B -. "분석 자료" .-> W[("Workspace 산출물")]
     C -. "튜닝 결과" .-> W
-    F -. "비평 결과" .-> W
+    D -. "비평 결과" .-> W
+    E -. "최종 SQL" .-> W
+    F -. "최종 검토" .-> W
     G -. "검증 결과" .-> W
     H -. "성능 결과" .-> W
     W -. "읽기 전용 조회" .-> L["Review UI"]
@@ -93,10 +97,11 @@ COLLECT_SQL
 | 역할 | 모델 경로 | 주요 책임 |
 |---|---|---|
 | Writer | `Llamacpp/Qwen` | 원본 SQL 분석 및 튜닝 후보 작성 |
-| Critic 1 | `Llamacpp/DeepSeekV4FlashDgxSpark` | 의미·문법·카디널리티·Oracle 위험 검토 |
-| Critic 2 | `Llamacpp/Hy3` | 독립적인 2차 비평 및 reasoning 검증 |
+| Critic | `Llamacpp/Hy3` | 초안 비평 및 최종 reasoning 검증 |
+| Final writer | `Llamacpp/DeepSeek_V4_Flash_0731_DSpark` | Hy3 피드백을 반영한 최종 SQL 재작성 |
 | Final gate | Oracle | Parse, plan, 결과 동등성 및 성능 검증 |
-세 모델 서버는 기본적으로 `127.0.0.1:8080`을 사용합니다. 단일 DGX에서 포트와
+
+모델 서버는 기본적으로 `127.0.0.1:8080`을 사용합니다. 단일 DGX에서 포트와
 통합 메모리를 공유하므로 한 번에 하나의 모델 stack만 실행하는 것을 전제로 합니다.
 
 ## 디렉터리 구조
@@ -113,6 +118,10 @@ Dgx_Sql_Tuning/
 │   ├── Qwen/                # Qwen writer 서버
 │   ├── DeepSeekV4FlashDgxSpark/
 │   │                         # DGX Spark용 DeepSeek critic 서버
+│   ├── DeepSeek_V4_Flash_0731/
+│   │                         # UD-IQ3_XXS llama.cpp 서버
+│   ├── DeepSeek_V4_Flash_0731_DSpark/
+│   │                         # DS4 SSD streaming 최종 writer 서버
 │   ├── Hy3/                 # Hy3 critic 및 reasoning 구성
 │   └── modelctl.sh          # 모델 stack 공통 제어
 ├── OutlinePass/             # SQL outline 추출 보조 도구
@@ -191,6 +200,10 @@ cp Llamacpp/Qwen/config.env.example Llamacpp/Qwen/config.env
 cp Llamacpp/DeepSeekV4FlashDgxSpark/config.env.example \
    Llamacpp/DeepSeekV4FlashDgxSpark/config.env
 cp Llamacpp/Hy3/config.env.example Llamacpp/Hy3/config.env
+cp Llamacpp/DeepSeek_V4_Flash_0731/config.env.example \
+   Llamacpp/DeepSeek_V4_Flash_0731/config.env
+cp Llamacpp/DeepSeek_V4_Flash_0731_DSpark/config.env.example \
+   Llamacpp/DeepSeek_V4_Flash_0731_DSpark/config.env
 ```
 
 각 `config.env`에서 모델 경로, revision, context와 로컬 token 값을 확인합니다.
@@ -212,6 +225,8 @@ cd Llamacpp
 Qwen
 DeepSeekV4FlashDgxSpark
 Hy3
+DeepSeek_V4_Flash_0731
+DeepSeek_V4_Flash_0731_DSpark
 ```
 
 ### 파일 기반 SQL 튜닝
@@ -243,8 +258,9 @@ ORACLE_PASSWORD=your-oracle-password
 ORACLE_DSN=db-host.example.com:1521/service_name
 ```
 
-기본 상태에서는 실제 benchmark와 Oracle 검증이 비활성화되어 있습니다.
-승인된 테스트 환경에서만 명시적으로 활성화합니다.
+`run_oracle.sh`는 Oracle 수집과 검증을 필수로 수행합니다. 파일 입력을 사용하는
+`run_files.sh`는 Oracle 접속정보와 드라이버가 준비되어 있으면 검증을 수행하고,
+준비되지 않았으면 경고 후 모델 전용 모드로 계속합니다.
 
 ```bash
 ORACLE_VALIDATE=1 \
@@ -291,9 +307,9 @@ docker compose \
 
 현재 공개본 기준:
 
-- 파이프라인 계약·상태·보안 테스트 **27개**
-- Review UI 경로·API 테스트 **6개**
-- 모델별 Docker Compose 구성 **10개**
+- 파이프라인 계약·상태·보안 테스트 **32개**
+- Review UI 경로·API 테스트 **9개**
+- 모델별 Docker Compose 정적 검증
 
 ## 기술 스택
 

@@ -1,0 +1,8 @@
+config.env
+open-webui.env
+runtime/*
+!runtime/local-gguf/
+runtime/local-gguf/*
+!runtime/local-gguf/README.md
+logs/
+*.log

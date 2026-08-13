@@ -29,8 +29,8 @@ UI_VOLUME="${OPEN_WEBUI_DATA_VOLUME:-llm-sql-open-webui-data}"
 
 for image in "${MODEL_IMAGE}" "${UI_IMAGE}"; do
   if ! docker image inspect "${image}" >/dev/null 2>&1; then
-    echo "[AutorunEnum Final] required offline image is missing: ${image}" >&2
-    echo "[AutorunEnum Final] load the offline image bundle before using UI mode." >&2
+    echo "[AutorunEnum Updated] required offline image is missing: ${image}" >&2
+    echo "[AutorunEnum Updated] load the offline image bundle before using UI mode." >&2
     exit 1
   fi
 done
@@ -45,4 +45,4 @@ docker compose \
   -f "${UI_DIR}/docker-compose.yml" \
   up -d --no-build --pull never --remove-orphans
 
-echo "[AutorunEnum Final] Qwen/Open WebUI started from local images only."
+echo "[AutorunEnum Updated] Qwen/Open WebUI started from local images only."

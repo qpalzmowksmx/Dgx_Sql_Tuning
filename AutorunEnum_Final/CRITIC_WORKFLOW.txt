@@ -1,80 +1,76 @@
-AutorunEnum sequential critic workflow
+AutorunEnum Updated sequential writer/critic workflow
 
 Purpose:
 
-Qwen is the primary SQL tuning writer.
-DeepSeek-V4-Flash-GGUF and Hy3 IQ1_M MTP are critic/analyzer models.
-They are not expected to run at the same time because each large model should own the DGX Spark memory budget.
+Qwen and DeepSeek V4 Flash 0731 have different writer roles.
+Qwen uses its 128K BF16 profile for broad analysis and the first SQL draft.
+DeepSeek 0731 on antirez/ds4 uses the compact Hy3 feedback to produce the final SQL. The single-Spark profile uses SSD streaming and disables DSpark speculation to stay within memory.
+Hy3 IQ1_M MTP remains an independent critic and reviews both candidates.
+Only one large model is loaded on the DGX Spark at a time.
 
-Target cycle:
+Default cycle (CRITIC_RETUNE_ROUNDS=1):
 
-1. Qwen writes tuned SQL.
-2. DeepSeek critic reviews every tuned SQL and writes critique reports.
-3. Hy3 IQ1_M MTP performs the second independent review.
-4. Both critic reports are merged into workspace/feedback.
-5. Qwen reads the first candidate plus both critic reports and writes the final SQL.
-6. Oracle validation/benchmark runs when enabled.
-7. All Llamacpp model containers stop for idle standby.
+1. Qwen writes the initial candidate for every query.
+2. Hy3 reviews every Qwen candidate and writes round-1 critique JSON.
+3. DeepSeek 0731 reads the original SQL, Qwen candidate, analysis, DB context,
+   and Hy3 feedback, then writes the final candidate.
+4. Hy3 reviews every final DeepSeek candidate and writes round-2 critique JSON.
+5. Oracle parse/explain/result validation and benchmark run when enabled.
+6. All Llamacpp model containers stop for idle standby.
 
-Execution:
+The final DeepSeek output is never treated as Hy3-approved merely because the
+first Qwen candidate was approved. The second Hy3 pass is mandatory in the
+default one-round flow.
 
-Use an OpenAI-compatible endpoint. The endpoint can stay the same while the loaded model changes.
-
-Example:
-
-CRITIC_MODELS=deepseek,hy3 AUTO_MODEL_SWAP=1 AUTO_STOP_MODELS=1 ./run_files.sh
-
-During the run:
-
-1. Qwen step:
-   - Start Qwen server on API_BASE_URL.
-   - Press Enter when the pipeline asks for the tuner model.
-
-2. DeepSeek critic step:
-   - Stop Qwen server to release VRAM.
-   - Start DeepSeek-V4-Flash-GGUF 2bit critic server on CRITIC_DEEPSEEK_API_BASE_URL.
-   - Press Enter.
-
-3. Hy3 critic step:
-   - Stop DeepSeek server.
-   - Start Hy3 IQ1_M MTP on CRITIC_HY3_API_BASE_URL.
-
-4. Feedback rewrite:
-   - Stop Hy3 and start Qwen again.
-   - Feed both critic JSON reports and the first Qwen candidate into Qwen.
-   - Save the final Qwen SQL and stop all models.
-
-Important environment values:
+Default environment:
 
 API_BASE_URL=http://localhost:8080/v1
-API_KEY=your-local-api-key
 MODEL_NAME=qwen-sql-tuner
+TUNER_START_SCRIPT=../Llamacpp/Qwen/WithoutUI/start.sh
 
-CRITIC_MODELS=deepseek,hy3
+CRITIC_MODELS=hy3
+CRITIC_HY3_MODEL_NAME=hy3-iq1-m-mtp
+CRITIC_HY3_REASONING_EFFORT=high
 REQUIRE_CRITIC_APPROVAL=1
+
+FINAL_WRITER_ENABLED=1
+FINAL_WRITER_START_SCRIPT=../Llamacpp/DeepSeek_V4_Flash_0731_DSpark/WithoutUI/start.sh
+FINAL_WRITER_MODEL_NAME=deepseek-v4-flash
+FINAL_WRITER_REQUEST_STYLE=ds4
+FINAL_WRITER_THINKING_MODE=thinking
+FINAL_WRITER_REASONING_EFFORT=max
+FINAL_WRITER_AGENT_MODE=minimal
+FINAL_WRITER_AGENT_PROMPT_PATH=../txt/DeepSeekV4Flash0731CodeAgentMaxPrompt.txt
+FINAL_WRITER_TEMPERATURE=0
+FINAL_WRITER_TOP_P=1.0
+FINAL_WRITER_TOP_K=0
+FINAL_WRITER_MIN_P=0.0
+FINAL_WRITER_SEED=42
+FINAL_WRITER_CONTEXT_SIZE=32768
+FINAL_WRITER_MAX_TOKENS=16384
+
 AUTO_MODEL_SWAP=1
 AUTO_STOP_MODELS=1
 
-CRITIC_DEEPSEEK_API_BASE_URL=http://localhost:8080/v1
-CRITIC_DEEPSEEK_API_KEY=your-local-api-key
-CRITIC_DEEPSEEK_MODEL_NAME=deepseek-v4-flash
+Artifacts:
 
-CRITIC_HY3_API_BASE_URL=http://localhost:8080/v1
-CRITIC_HY3_API_KEY=your-local-api-key
-CRITIC_HY3_MODEL_NAME=hy3-iq1-m-mtp
+- workspace/B/rounds/round-1/<query>-B.sql: Qwen candidate
+- workspace/critique/<query>/round-1/hy3.json: first Hy3 review
+- workspace/B/rounds/round-2/<query>-B.sql: DeepSeek final candidate
+- workspace/critique/<query>/round-2/hy3.json: final Hy3 review
+- workspace/B/<query>-B.sql: latest candidate
+- workspace/feedback/<query>.json: latest compact critic feedback
+- workspace/validation/<query>.json: Oracle validation
+- workspace/benchmark/<query>.json: benchmark result
 
-Output files:
+Failure behavior:
 
-- workspace/critique/<query_name>/deepseek.json
-- workspace/critique/<query_name>/deepseek.txt
-- workspace/critique/<query_name>/hy3.json
-- workspace/critique/<query_name>/hy3.txt
-- workspace/validation/<query_name>.json
-- workspace/feedback/<query_name>.json
-- workspace/benchmark/<query_name>.json
+- A Qwen failure preserves the original SQL for that query.
+- A DeepSeek final-writer failure preserves the previous Qwen candidate.
+- Invalid structured JSON is not accepted as SQL.
+- A rejected final Hy3 review prevents critic approval.
+- Oracle validation and benchmark remain the deterministic final gates.
 
-Decision rule:
-
-If REQUIRE_CRITIC_APPROVAL=1, every configured critic must return approved=true.
-Both critic reports are always returned to the final Qwen rewrite.
-If REQUIRE_ORACLE_VALIDATION=1, Oracle parse/explain/sample validation must also pass.
+Set CRITIC_RETUNE_ROUNDS=0 only when the DeepSeek final-writer stage should be
+disabled. Additional rounds keep DeepSeek as the feedback writer and are meant
+for explicit recovery experiments, not the normal default.

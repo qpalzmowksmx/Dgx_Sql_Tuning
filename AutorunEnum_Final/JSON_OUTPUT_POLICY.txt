@@ -17,13 +17,13 @@ Current split:
 - workspace/benchmark/<query>.json: benchmark result
 - workspace/critique/<query>/<critic>.json: machine critic report
 - workspace/critique/<query>/<critic>.txt: human critic view
-- workspace/feedback/<query>.json: compact feedback payload for Qwen retry
+- workspace/feedback/<query>.json: compact feedback payload for the next writer
 - workspace/status.json: pipeline status
 - workspace/summary.json: final run summary
 
 LLM JSON contracts:
 
-Qwen tuner response:
+Qwen/DeepSeek writer response:
 
 {"sql":"...","why":["..."],"risk":["..."],"check":["..."]}
 
@@ -43,7 +43,7 @@ Runtime enforcement:
 - The prompt explains field meaning in English.
 - Compatible llama.cpp/vLLM requests receive response_format with the corresponding JSON Schema.
 - AutorunEnum validates the parsed object against the same schema after generation.
-- Invalid tuner JSON returns the original SQL and enters review/retry instead of treating prose as SQL.
+- Invalid initial Qwen JSON returns the original SQL. Invalid DeepSeek rewrite JSON preserves the previous Qwen candidate instead of treating prose as SQL.
 - Invalid critic JSON rejects the tuned candidate.
 - DwarfStar stays prompt-only unless CRITIC_<ALIAS>_STRUCTURED_OUTPUT=1 is explicitly tested and enabled.
 

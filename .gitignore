@@ -5,6 +5,7 @@
 !**/.env.example
 *.env
 !*.env.example
+!Llamacpp/DeepSeek_V4_Flash_0731_DSpark/runtime.env
 config.env
 config.env.*
 !config.env.example

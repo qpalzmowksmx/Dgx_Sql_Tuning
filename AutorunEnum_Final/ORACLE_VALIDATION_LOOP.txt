@@ -7,17 +7,18 @@ Every tuned SQL must pass Oracle-side validation before it can be reported as ve
 
 Safe loop:
 
-1. Qwen creates tuned SQL.
-2. DeepSeek 2bit critic reviews the SQL.
-3. If possible, a BF16 or 8bit+ model performs second critic review.
-4. Oracle validates the tuned SQL with parse and EXPLAIN PLAN.
-5. If Oracle returns an ORA error, the ORA code, offset, and message are written to feedback JSON.
-6. EXPLAIN PLAN rejects tuned plans containing TEMP TABLE TRANSFORMATION, LOAD AS SELECT, or CURSOR DURATION MEMORY.
-7. Explicit MATERIALIZED/MATERIALIZE/RESULT_CACHE usage is rejected before execution.
-8. Original and tuned SQL are executed with a small row limit inside the same read-only transaction.
-9. Limited row count, column names, ordered hash, unordered hash, and sample rows are compared.
-10. Original/tuned execution time is benchmarked against the same read-only snapshot.
-11. Only SQL that passes critic requirements, Oracle validation, and benchmark criteria is marked verified.
+1. Qwen creates the initial tuned SQL.
+2. Hy3 IQ1_M independently critiques the Qwen candidate.
+3. DeepSeek V4 Flash 0731 on antirez/ds4 writes the final SQL from that feedback using the validated single-Spark SSD-streaming profile.
+4. Hy3 reviews the final DeepSeek candidate again.
+5. Oracle validates the tuned SQL with parse and EXPLAIN PLAN.
+6. If Oracle returns an ORA error, the ORA code, offset, and message are written to feedback JSON.
+7. EXPLAIN PLAN rejects tuned plans containing TEMP TABLE TRANSFORMATION, LOAD AS SELECT, or CURSOR DURATION MEMORY.
+8. Explicit MATERIALIZED/MATERIALIZE/RESULT_CACHE usage is rejected before execution.
+9. Original and tuned SQL are executed with a small row limit inside the same read-only transaction.
+10. Limited row count, column names, ordered hash, unordered hash, and sample rows are compared.
+11. Original/tuned execution time is benchmarked against the same read-only snapshot.
+12. Only SQL that passes critic requirements, Oracle validation, and benchmark criteria is marked verified.
 
 Prompt rules:
 
