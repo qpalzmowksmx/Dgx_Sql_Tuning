@@ -1,0 +1,74 @@
+name: deepseekv4flash0731dspark
+
+services:
+  ds4-server:
+    image: ${DOCKER_IMAGE:-llm-sql-dsv4-0731-dspark-dgx-spark:antirez-b7e9f00}
+    pull_policy: never
+    container_name: ${DOCKER_CONTAINER:-deepseek-v4-flash-0731-dspark-server}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        CUDA_IMAGE: ${CUDA_IMAGE:-nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04}
+        DS4_REF: ${DS4_REF:-main}
+        DS4_COMMIT: ${DS4_COMMIT:-b7e9f0091139999b6c070a57590c447c5741da5c}
+        DS4_WRAPPER_REVISION: ${DS4_WRAPPER_REVISION:-20260807.3}
+        BUILD_JOBS: ${BUILD_JOBS:-8}
+    environment:
+      BASE_GGUF_FILE: ${BASE_GGUF_FILE}
+      DSPARK_SUPPORT_GGUF_FILE: ${DSPARK_SUPPORT_GGUF_FILE}
+      CTX_SIZE: ${CTX_SIZE:-32768}
+      DEFAULT_MAX_TOKENS: ${DEFAULT_MAX_TOKENS:-16384}
+      THREADS: ${THREADS:-16}
+      GPU_VRAM: ${GPU_VRAM-}
+      PREFILL_CHUNK: ${PREFILL_CHUNK:-2048}
+      SSD_STREAMING: ${SSD_STREAMING:-1}
+      SSD_STREAMING_CACHE_EXPERTS: ${SSD_STREAMING_CACHE_EXPERTS:-48GB}
+      DS4_ENABLE_DSPARK: ${DS4_ENABLE_DSPARK:-0}
+      DSPARK_CONFIDENCE: ${DSPARK_CONFIDENCE:-0.7}
+      KV_DISK_SPACE_MB: ${KV_DISK_SPACE_MB:-8192}
+      KV_CACHE_MIN_TOKENS: ${KV_CACHE_MIN_TOKENS:-512}
+      KV_CACHE_COLD_MAX_TOKENS: ${KV_CACHE_COLD_MAX_TOKENS:-30000}
+      KV_CACHE_CONTINUED_INTERVAL_TOKENS: ${KV_CACHE_CONTINUED_INTERVAL_TOKENS:-10000}
+      HOST: 0.0.0.0
+      PORT: ${PORT:-8080}
+      ENABLE_CORS: ${ENABLE_CORS:-1}
+      WARM_WEIGHTS: ${WARM_WEIGHTS:-0}
+      QUALITY_MODE: ${QUALITY_MODE:-0}
+      CUDA_VISIBLE_DEVICES: "0"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:${PORT:-8080}"
+    volumes:
+      - ../models:/models:ro
+      - ds4-kv:/var/lib/ds4/kv
+    gpus:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
+    ipc: host
+    shm_size: ${SHM_SIZE:-16gb}
+    ulimits:
+      memlock: {soft: -1, hard: -1}
+      stack: {soft: 67108864, hard: 67108864}
+      nofile: {soft: 1048576, hard: 1048576}
+    restart: ${RESTART_POLICY:-unless-stopped}
+    stop_grace_period: 5m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/$${PORT:-8080};
+          printf "GET /v1/models HTTP/1.0\r\n\r\n" >&3;
+          IFS= read -r status <&3; [[ "$${status}" == *" 200 "* ]]'
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 2h
+
+volumes:
+  ds4-kv:
+    name: ${DOCKER_KV_VOLUME:-deepseek-v4-flash-0731-dspark-chat-kv}
+
+networks:
+  default:
+    internal: true

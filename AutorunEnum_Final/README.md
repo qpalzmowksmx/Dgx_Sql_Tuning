@@ -1,11 +1,11 @@
-# AutorunEnum Final
+# AutorunEnum Updated
 
 Oracle SQL tuning pipeline.
 
 ## 1. Install dependency
 
 ```bash
-cd ${PROJECT_ROOT}
+cd /path/to/Dgx_Sql_Tuning
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r AutorunEnum_Final/requirements.txt
@@ -24,13 +24,11 @@ PYTHON_BIN=/absolute/path/to/venv/bin/python3 ./AutorunEnum_Final/run_oracle.sh
 
 ## 2. Configure Oracle
 
-Copy the public-safe example, then replace every placeholder. You may instead
-use the repository root `.env`.
+Create `AutorunEnum_Final/.env` or use the repository root `.env`.
 
 ```bash
-cp AutorunEnum_Final/.env.example AutorunEnum_Final/.env
 ORACLE_USER=app_user
-ORACLE_PASSWORD=your-oracle-password
+ORACLE_PASSWORD=change-me
 ORACLE_DSN=host.example.com:1521/service_name
 ```
 
@@ -38,7 +36,7 @@ Optional LLM endpoint:
 
 ```bash
 API_BASE_URL=http://localhost:8080/v1
-API_KEY=your-local-api-key
+API_KEY=sk-local
 MODEL_NAME=qwen-sql-tuner
 ```
 
@@ -135,22 +133,14 @@ are hashed while streaming and are not saved unless `STORE_SAMPLE_ROWS=1`.
 first-page latency is the intended metric. Benchmarks perform one warm-up, alternate
 original/tuned execution order, and compare medians across `BENCHMARK_REPETITIONS` runs.
 
-Sequential local critic loop:
+Sequential local writer/critic loop:
 
 ```bash
-CRITIC_MODELS=deepseek,hy3
+CRITIC_MODELS=hy3
 REQUIRE_CRITIC_APPROVAL=1
 AUTO_MODEL_SWAP=1
 AUTO_STOP_MODELS=1
 CRITIC_MAX_TOKENS=4096
-CRITIC_DEEPSEEK_API_BASE_URL=http://localhost:8080/v1
-CRITIC_DEEPSEEK_MODEL_NAME=deepseek-v4-flash-iq3-xxs
-CRITIC_DEEPSEEK_REQUEST_STYLE=deepseek_v4
-CRITIC_DEEPSEEK_TEMPERATURE=1.0
-CRITIC_DEEPSEEK_TOP_P=1.0
-CRITIC_DEEPSEEK_TOP_K=0
-CRITIC_DEEPSEEK_MIN_P=0.0
-CRITIC_DEEPSEEK_THINKING_MODE=thinking
 CRITIC_HY3_API_BASE_URL=http://localhost:8080/v1
 CRITIC_HY3_MODEL_NAME=hy3-iq1-m-mtp
 CRITIC_HY3_REQUEST_STYLE=hy3
@@ -159,33 +149,33 @@ CRITIC_HY3_TOP_P=1.0
 CRITIC_HY3_TOP_K=0
 CRITIC_HY3_MIN_P=0.0
 CRITIC_HY3_REASONING_EFFORT=high
+FINAL_WRITER_ENABLED=1
+FINAL_WRITER_START_SCRIPT=../Llamacpp/DeepSeek_V4_Flash_0731_DSpark/WithoutUI/start.sh
+FINAL_WRITER_MODEL_NAME=deepseek-v4-flash
+FINAL_WRITER_REQUEST_STYLE=ds4
+FINAL_WRITER_TEMPERATURE=0
+FINAL_WRITER_TOP_P=1.0
+FINAL_WRITER_TOP_K=0
+FINAL_WRITER_MIN_P=0.0
+FINAL_WRITER_THINKING_MODE=thinking
+FINAL_WRITER_REASONING_EFFORT=max
+FINAL_WRITER_AGENT_MODE=minimal
+FINAL_WRITER_AGENT_PROMPT_PATH=../txt/DeepSeekV4Flash0731CodeAgentMaxPrompt.txt
+FINAL_WRITER_CONTEXT_SIZE=32768
+FINAL_WRITER_MAX_TOKENS=16384
+FINAL_WRITER_STRUCTURED_OUTPUT=0
 ```
 
-`CRITIC_DEEPSEEK_REQUEST_STYLE`은 실행 중인 서버가 실제로 지원하는 요청 형식과
-일치해야 합니다. 다른 서버를 연결할 때는 해당 서버의 model alias와 reasoning
-확장 필드를 먼저 검증하세요.
-
-When the full DeepSeek V4 vLLM profile is running on supported hardware, enable
-its recommended sampling and Think High mode:
-
-```bash
-CRITIC_DEEPSEEK_API_BASE_URL=http://localhost:8000/v1
-CRITIC_DEEPSEEK_MODEL_NAME=deepseek-v4-flash
-CRITIC_DEEPSEEK_REQUEST_STYLE=vllm
-CRITIC_DEEPSEEK_TEMPERATURE=1.0
-CRITIC_DEEPSEEK_TOP_P=1.0
-CRITIC_DEEPSEEK_THINKING=1
-CRITIC_DEEPSEEK_REASONING_EFFORT=high
-```
-
-These request extensions are optional and are not sent to other critic models
-unless their corresponding environment variables are set.
+DS4 서버와 파이프라인 입력 예산은 모두 64K입니다. Q2/Q4 혼합 본체와
+DSpark support 모델이 단일 DGX Spark 메모리에 들어가지 않으면 `CTX_SIZE`와
+`FINAL_WRITER_CONTEXT_SIZE`를 함께 49152, 이후 32768 순서로 낮춥니다.
 
 ## 3. Run
 
-Recommended on the company machine. This path uses the Qwen/critic APIs without
-Open WebUI, requires structured JSON responses, performs one Qwen rewrite after
-critic feedback, and sends that final rewrite through both critics once more:
+Recommended on the company machine. This path uses the model APIs without Open
+WebUI, requires structured JSON responses, writes first with Qwen, critiques
+with Hy3, rewrites with DeepSeek 0731, and sends the final rewrite through Hy3
+once more:
 
 ```bash
 ./run_oracle.sh
@@ -213,7 +203,7 @@ and Open WebUI running, and prints `http://127.0.0.1:3000`. Pipeline requests
 still use the structured JSON contracts. Stop the UI later with
 `../Llamacpp/Qwen/WithUI/stop.sh`.
 
-The Final UI handoff never builds or pulls images. It requires both
+The Updated UI handoff never builds or pulls images. It requires both
 `llamacpp-qwen-server:cuda` and
 `llm-sql-open-webui:v0.9.4-dgx-stats` to already exist locally; otherwise it
 fails before changing the running model state.
@@ -263,37 +253,45 @@ python3 main.py --mode oracle --tuner llm --execute-benchmark --benchmark-row-li
 Dry-run with local SQL files:
 
 ```bash
-cd ${PROJECT_ROOT}
+cd /path/to/Dgx_Sql_Tuning
 ./AutorunEnum_Final/run_files.sh
 ```
 
 `run_files.sh` always resolves relative paths from the `LLM-sql` repository root
 and writes the active run to top-level `workspace/`. Its default model flow is:
 
-1. Qwen analyzes the SQL and writes the initial tuned SQL.
-2. DeepSeek V4 Flash critiques that candidate.
-3. Hy3 IQ1_M critiques the same candidate independently.
-4. Qwen receives both saved critic JSON reports and writes the final SQL.
-5. DeepSeek and Hy3 review the final Qwen rewrite again.
-6. All Llamacpp model containers are stopped for idle standby.
+1. Qwen analyzes the SQL with its 128K profile and writes the initial SQL.
+2. Hy3 IQ1_M critiques the Qwen candidate with `reasoning_effort=high`.
+3. DeepSeek V4 Flash 0731 on antirez/ds4 receives the original, Qwen candidate,
+   DB context, and Hy3 feedback, then writes the final SQL using the validated
+   single-Spark SSD-streaming profile.
+4. Hy3 reviews the final DeepSeek candidate again.
+5. All Llamacpp model containers are stopped for idle standby.
 
-The 128K Qwen tuner and two 64K critic models are not loaded together.
+The 128K Qwen writer, 32K DS4 SSD-streaming DeepSeek writer, and Hy3 critic are not loaded together.
 `AUTO_MODEL_SWAP=1` uses each model's `WithoutUI/start.sh`, waits for the exact
 `/v1/models` ID, and then starts requests. Each SQL prints a start/completion
 line and elapsed time; while a request is running it also prints a heartbeat
-every 15 seconds. Oracle validation remains disabled in this offline/manual
-path. DeepSeek uses
-`thinking_mode=thinking`; Hy3 uses `reasoning_effort=high`. Both keep their official
-temperature/top-p values, explicitly disable unrequested candidate filters and penalties,
-use seed 42, return compact structured JSON, and have a 4,096 token response limit.
-Increase `CRITIC_DEEPSEEK_MAX_TOKENS` only when the extra runtime is intentional.
+every 15 seconds. Manual file collection does not require network access, but
+Oracle parse/explain/sample-result validation is attempted by default. In file
+mode, an unavailable Oracle automatically disables the Oracle gates and the
+model-only pipeline continues; set `REQUIRE_ORACLE_VALIDATION=1` to fail closed.
+Put `ORACLE_USER`, `ORACLE_PASSWORD`, and `ORACLE_DSN` in the repository `.env`.
+The longer original-versus-tuned performance benchmark remains opt-in with
+`EXECUTE_BENCHMARK=1`. DeepSeek uses
+`reasoning_effort=max`, explicit greedy temperature 0, top-p 1.0 and a minimal
+single-request agent profile with a
+16,384-token ceiling. Hy3 uses `reasoning_effort=high`, temperature 0.9,
+top-p 1.0 and a 4,096-token critic ceiling. Both disable unrequested filters and
+penalties, use seed 42, and return structured JSON.
 When a candidate is unchanged, the critic receives the full SQL only once plus
 an explicit duplicate marker, preventing long queries from exceeding the 64K
 model context merely because original and tuned text are identical.
-Transient Qwen and critic HTTP 429/5xx failures are attempted twice by default.
-A failed Qwen request returns that query's original SQL and processing continues
-with the remaining queries. Status JSON is checkpointed after each tuner and
-critic result. Before each run,
+Transient Qwen, DeepSeek writer, and Hy3 critic HTTP 429/5xx failures are
+attempted twice by default. A failed Qwen request preserves the original SQL; a
+failed DeepSeek rewrite preserves the previous Qwen candidate. Processing then
+continues with the remaining queries. Status JSON is checkpointed after each
+writer and critic result. Before each run,
 the previous active result set is moved intact under `workspace/archive/run-*`
 so stale critic files cannot be mistaken for the current run.
 Only one process can use a workspace at a time.
@@ -340,6 +338,21 @@ To opt back into an interactive multi-model review:
 CRITIC_MODELS=deepseek,nemotron MANUAL_MODEL_SWAP=1 ./AutorunEnum_Final/run_files.sh
 ```
 
+For the complete Oracle performance comparison as well as the default
+parse/explain/result-equivalence gate:
+
+```bash
+EXECUTE_BENCHMARK=1 ./AutorunEnum_Final/run_files.sh
+```
+
+Only an intentional model-only dry run should bypass Oracle. It must be
+explicit so that an unvalidated result cannot look like a verified result:
+
+```bash
+ORACLE_VALIDATE=0 REQUIRE_ORACLE_VALIDATION=0 \
+  ./AutorunEnum_Final/run_files.sh
+```
+
 The default is `TUNER=llm`. For a no-model smoke test only, use
 `TUNER=local CRITIC_MODELS= CRITIC_RETUNE_ROUNDS=0 ./AutorunEnum_Final/run_files.sh`.
 
@@ -347,11 +360,11 @@ The default is `TUNER=llm`. For a no-model smoke test only, use
 
 - `workspace/tmp`: collected original SQL files, numbered by usage rank
 - `workspace/A`: human-readable analysis `.txt` plus machine-readable analysis `.json`
-- `workspace/B`: latest tuned SQL and JSON plus all Qwen rounds under `rounds/round-N`
+- `workspace/B`: latest SQL and JSON; round 1 is Qwen and round 2 is DeepSeek under `rounds/round-N`
 - `workspace/validation`: Oracle parse/explain/sample comparison reports
 - `workspace/benchmark`: original/tuned metric comparison
 - `workspace/critique`: latest critic files plus all reviews under each query's `round-N`
-- `workspace/feedback`: compact JSON critic feedback fed back into the next Qwen retry
+- `workspace/feedback`: compact JSON critic feedback fed into the next writer
 - `workspace/improved`: SQL that passed the complete execution benchmark
 - `workspace/approved`: critic- or Oracle-approved SQL whose performance was not executed
 - `workspace/generated`: generated SQL with no critic, Oracle, or performance gate
@@ -376,7 +389,7 @@ changing them, refreshes every five seconds, and also discovers preserved runs u
 
 Repository contracts and dynamic context:
 
-- `../contracts/tuner_response.schema.json`: Qwen writer response contract
+- `../contracts/tuner_response.schema.json`: shared Qwen/DeepSeek writer response contract
 - `../contracts/critic_response.schema.json`: critic response contract
 - `../contracts/db_catalog.schema.json`: DB catalog file contract
 - `../contracts/oracle_db_metadata.template.json`: Qwen-ready Oracle metadata template
@@ -385,6 +398,10 @@ Repository contracts and dynamic context:
 - `../db_context/catalog.json`: local live metadata, intentionally ignored by Git
 - `../db_context/queries/<SQL_ID>.json`: optional per-query plan/bind/runtime context
 
-See `CRITIC_WORKFLOW.txt` for the non-simultaneous Qwen -> DeepSeek -> Nemotron -> Qwen feedback loop.
+See `CRITIC_WORKFLOW.txt` for the non-simultaneous Qwen -> Hy3 -> DeepSeek 0731 -> Hy3 loop.
+The DeepSeek writer's minimal/max instruction is externalized in
+`../txt/DeepSeekV4Flash0731CodeAgentMaxPrompt.txt`. The unreleased DeepSeek
+Harness is not bundled or claimed; this profile reproduces only the published
+single-turn/minimal behavior and supported reasoning/sampling controls.
 See `JSON_OUTPUT_POLICY.txt` for the machine-output format rule.
 See `ORACLE_VALIDATION_LOOP.txt` for the mandatory Oracle validation loop.

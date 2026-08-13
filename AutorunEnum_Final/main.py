@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
         "--critic-retune-rounds",
         type=int,
         default=0,
-        help="Qwen retuning rounds performed after critic feedback",
+        help="feedback rewrite rounds; round 1 uses the configured DeepSeek final writer",
     )
     parser.add_argument(
         "--collect-hours",
@@ -149,7 +149,7 @@ def run_pipeline(manager: PipelineManager) -> PipelineManager:
             manager.tune_sql()
             if feedback_retune_active:
                 feedback_retune_active = False
-                # The final Qwen rewrite must be reviewed again. Otherwise Qwen can
+                # The final writer rewrite must be reviewed again. Otherwise it can
                 # introduce a new semantic error after both critics have approved
                 # the previous candidate.
                 state = PipelineState.CRITIQUE

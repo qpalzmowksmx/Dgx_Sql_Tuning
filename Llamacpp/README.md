@@ -7,6 +7,10 @@ Public-safe model-server tooling for NVIDIA DGX Spark. The included stacks are:
   `satindergrewal/llama.cpp` fork and UD-IQ3_XXS GGUF.
 - `Hy3/`: Hy3 IQ1_M critic with the required llama.cpp support and optional
   reasoning/MTP configuration.
+- `DeepSeek_V4_Flash_0731/`: DeepSeek V4 Flash 0731 UD-IQ3_XXS served with
+  the llama.cpp-compatible runtime.
+- `DeepSeek_V4_Flash_0731_DSpark/`: DS4 SSD-streaming runtime used as the
+  final writer by `AutorunEnum_Final`.
 
 All stacks default to loopback-only API and Web UI bindings. Do not expose them
 on a public interface without authentication, firewall rules, and transport
@@ -22,8 +26,14 @@ From the `Llamacpp` directory:
 ./modelctl.sh stop
 ```
 
-Valid model names are `Qwen`, `DeepSeekV4FlashDgxSpark`, and `Hy3`. Only one
-stack should be active at a time because they share ports and unified memory.
+Valid public model names include `Qwen`, `DeepSeekV4FlashDgxSpark`, `Hy3`,
+`DeepSeek_V4_Flash_0731`, and `DeepSeek_V4_Flash_0731_DSpark`. Only one stack
+should be active at a time because they share ports and unified memory.
+
+The DS4 source is intentionally not vendored in this repository. On an
+internet-connected preparation machine, run
+`DeepSeek_V4_Flash_0731_DSpark/prepare_online.sh --source-only`, then copy the
+prepared directory and separately obtained GGUF files into the closed network.
 
 For direct model-specific operation:
 
@@ -52,4 +62,3 @@ and troubleshooting guidance.
 - [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - [DeepSeek V4 Flash GGUF](https://huggingface.co/unsloth/DeepSeek-V4-Flash-GGUF)
 - [Hy3 GGUF](https://huggingface.co/AngelSlim/Hy3-GGUF)
-

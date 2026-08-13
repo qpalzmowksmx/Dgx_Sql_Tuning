@@ -3,7 +3,8 @@ Public prompt and architecture references
 - `MasteryPrompt.txt`: Oracle SQL tuning writer system prompt.
 - `CriticPrompt.txt`: independent critic system prompt.
 - `Autorun_Structure.txt`: generated workspace and pipeline layout.
+- `DeepSeekV4Flash0731CodeAgentMaxPrompt.txt`: final-writer agent prompt used
+  by the DeepSeek V4 Flash 0731 stage.
 
 Runtime SQL, customer-specific tuning notes, benchmark measurements, host
 commands, and internal proposal material are intentionally excluded.
-

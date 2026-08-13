@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODELS=(DeepSeekV4FlashDgxSpark Hy3 Qwen)
+MODELS=(DeepSeek DeepSeekV4FlashDgxSpark DeepSeek_V4_Flash_0731 DeepSeek_V4_Flash_0731_DSpark DwarfStar Hy3 Nemotron Qwen)
 
 usage() {
   cat <<'EOF'
@@ -11,7 +11,8 @@ Usage:
   ./modelctl.sh stop
   ./modelctl.sh status
 
-Models: DeepSeekV4FlashDgxSpark, Hy3, Qwen
+Models: DeepSeek, DeepSeekV4FlashDgxSpark, DeepSeek_V4_Flash_0731,
+DeepSeek_V4_Flash_0731_DSpark, DwarfStar, Hy3, Nemotron, Qwen
 
 Only one model stack is started at a time. Model caches and Open WebUI data are
 named volumes and are not deleted by stop or model switching.
@@ -40,6 +41,16 @@ compose_for() {
 
 stop_all() {
   "${ROOT_DIR}/offline_proxy.sh" stop || true
+  local stop_script
+  for stop_script in \
+    "DeepSeek_V4_Flash_0731/WithoutUI/stop.sh" \
+    "DeepSeek_V4_Flash_0731/WithUI/stop.sh" \
+    "DeepSeek_V4_Flash_0731_DSpark/WithoutUI/stop.sh" \
+    "DeepSeek_V4_Flash_0731_DSpark/WithUI/stop.sh"; do
+    if [[ -f "${ROOT_DIR}/${stop_script}" ]]; then
+      bash "${ROOT_DIR}/${stop_script}" >/dev/null 2>&1 || true
+    fi
+  done
   local model
   for model in "${MODELS[@]}"; do
     compose_for "${model}" down --remove-orphans >/dev/null 2>&1 || true
@@ -62,6 +73,20 @@ start_model() {
     cp "${model_dir}/config.env.example" "${model_dir}/config.env"
     echo "Created ${model_dir}/config.env from the example."
   fi
+
+  if [[ "${model}" == "DwarfStar" ]]; then
+    mkdir -p \
+      "${model_dir}/runtime/gguf" \
+      "${model_dir}/runtime/kv-cache" \
+      "${model_dir}/runtime/traces"
+  fi
+
+  case "${model}" in
+    DeepSeek_V4_Flash_0731|DeepSeek_V4_Flash_0731_DSpark)
+      "${model_dir}/WithoutUI/start.sh"
+      return
+      ;;
+  esac
 
   stop_all
   compose_for "${model}" up -d --build

@@ -102,6 +102,10 @@ class PipelineContractTests(unittest.TestCase):
         self.assertIn('--critic-retune-rounds "${critic_retune_rounds}"', common)
         self.assertIn("TUNER_STRUCTURED_OUTPUT=1", common)
         self.assertIn("Qwen/WithoutUI/start.sh", common)
+        self.assertIn("DeepSeek_V4_Flash_0731_DSpark", common)
+        self.assertIn('DEEPSEEK_START="${DEEPSEEK_DIR}/WithoutUI/start.sh"', common)
+        self.assertIn('CRITIC_MODELS="${CRITIC_MODELS-hy3}"', common)
+        self.assertIn("FINAL_WRITER_START_SCRIPT", common)
         self.assertIn("start_qwen_ui_offline.sh", common)
 
         offline_ui = (AUTORUN_DIR / "start_qwen_ui_offline.sh").read_text(
@@ -127,6 +131,181 @@ class PipelineContractTests(unittest.TestCase):
                 'TUNER_MAX_TOKENS="${TUNER_MAX_TOKENS-81920}"',
                 launcher,
             )
+            self.assertIn(
+                'FINAL_WRITER_REASONING_EFFORT="${FINAL_WRITER_REASONING_EFFORT-max}"',
+                launcher,
+            )
+            self.assertIn(
+                'FINAL_WRITER_AGENT_MODE="${FINAL_WRITER_AGENT_MODE-minimal}"',
+                launcher,
+            )
+
+        self.assertIn(
+            'DEEPSEEK_DIR="${REPO_ROOT}/Llamacpp/DeepSeek_V4_Flash_0731_DSpark"',
+            run_files,
+        )
+        self.assertIn('DEEPSEEK_START="${DEEPSEEK_DIR}/WithoutUI/start.sh"', run_files)
+        self.assertIn(
+            'FINAL_WRITER_MODEL_NAME="${FINAL_WRITER_MODEL_NAME-deepseek-v4-flash}"',
+            run_files,
+        )
+        self.assertIn(
+            'FINAL_WRITER_REQUEST_STYLE="${FINAL_WRITER_REQUEST_STYLE-ds4}"',
+            run_files,
+        )
+        self.assertIn(
+            'FINAL_WRITER_CONTEXT_SIZE="${FINAL_WRITER_CONTEXT_SIZE-32768}"',
+            run_files,
+        )
+        self.assertIn(
+            'FINAL_WRITER_TEMPERATURE="${FINAL_WRITER_TEMPERATURE-0}"',
+            run_files,
+        )
+        self.assertIn(
+            'FINAL_WRITER_STRUCTURED_OUTPUT="${FINAL_WRITER_STRUCTURED_OUTPUT-0}"',
+            run_files,
+        )
+        self.assertIn(
+            'FINAL_WRITER_MODEL_NAME="${FINAL_WRITER_MODEL_NAME-deepseek-v4-flash}"',
+            oracle_common,
+        )
+        self.assertIn(
+            'FINAL_WRITER_CONTEXT_SIZE="${FINAL_WRITER_CONTEXT_SIZE-32768}"',
+            oracle_common,
+        )
+
+    def test_file_launcher_falls_back_when_oracle_is_unavailable(self) -> None:
+        run_files = (AUTORUN_DIR / "run_files.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn('${1,,}', run_files)
+        self.assertIn('ORACLE_VALIDATE="${ORACLE_VALIDATE-1}"', run_files)
+        self.assertIn(
+            'REQUIRE_ORACLE_VALIDATION="${REQUIRE_ORACLE_VALIDATION-0}"',
+            run_files,
+        )
+        self.assertIn('EXECUTE_BENCHMARK="${EXECUTE_BENCHMARK-0}"', run_files)
+        self.assertIn("ARGS+=(--oracle-validate)", run_files)
+        self.assertIn("ARGS+=(--execute-benchmark)", run_files)
+        self.assertIn("import oracledb", run_files)
+        self.assertIn("oracle_preflight.py", run_files)
+        self.assertIn("continuing with model-only processing", run_files)
+
+    def test_deepseek_0731_with_ui_has_reproducible_build_and_health_paths(self) -> None:
+        with_ui = REPO_ROOT / "Llamacpp/DeepSeek_V4_Flash_0731/WithUI"
+        compose = (with_ui / "docker-compose.yml").read_text(encoding="utf-8")
+        build = (with_ui / "build.sh").read_text(encoding="utf-8")
+        start = (with_ui / "start.sh").read_text(encoding="utf-8")
+        health = (with_ui / "health_check.sh").read_text(encoding="utf-8")
+
+        self.assertIn("dockerfile: docker/Dockerfile", compose)
+        self.assertIn("pull_policy: never", compose)
+        self.assertIn("llm-sql-open-webui:v0.9.4-dgx-stats", compose)
+        self.assertIn("condition: service_healthy", compose)
+        self.assertIn("TEMPERATURE: ${TEMPERATURE:-1.0}", compose)
+        self.assertIn("TOP_P: ${TOP_P:-0.95}", compose)
+        self.assertIn("REASONING_EFFORT: ${REASONING_EFFORT:-max}", compose)
+        self.assertIn(
+            "LLAMA_SERVER_EXTRA_ARGS: ${LLAMA_SERVER_EXTRA_ARGS:---metrics --perf --jinja}",
+            compose,
+        )
+        self.assertIn("build deepseek-iq3-xxs", build)
+        self.assertIn("host_compose.sh", start)
+        self.assertIn("/v1/models", health)
+        self.assertIn("OPEN_WEBUI_PORT", health)
+
+        server = (
+            REPO_ROOT / "Llamacpp/DeepSeek_V4_Flash_0731/scripts/03_start_server.sh"
+        ).read_text(encoding="utf-8")
+        config = (
+            REPO_ROOT / "Llamacpp/DeepSeek_V4_Flash_0731/config.env.example"
+        ).read_text(encoding="utf-8")
+        self.assertIn('--chat-template-kwargs "${template_kwargs}"', server)
+        self.assertIn("REASONING_EFFORT=max", config)
+        self.assertIn("TEMPERATURE=1.0", config)
+        self.assertIn("TOP_P=0.95", config)
+
+        self.assertTrue(
+            (REPO_ROOT / "Llamacpp/DeepSeek_V4_Flash_0731/docker/Dockerfile").is_file()
+        )
+        host_compose = (
+            REPO_ROOT / "Llamacpp/DeepSeek_V4_Flash_0731/scripts/host_compose.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("up -d --no-build --pull never", host_compose)
+        self.assertIn("iq3xxs_wait_for_health", host_compose)
+
+    def test_ds4_dspark_without_ui_contract(self) -> None:
+        model_dir = REPO_ROOT / "Llamacpp/DeepSeek_V4_Flash_0731_DSpark"
+        without_ui = model_dir / "WithoutUI"
+        with_ui = model_dir / "WithUI"
+        compose = (without_ui / "docker-compose.yml").read_text(encoding="utf-8")
+        start = (without_ui / "start.sh").read_text(encoding="utf-8")
+        with_ui_start = (with_ui / "start.sh").read_text(encoding="utf-8")
+        offline_proxy = (REPO_ROOT / "Llamacpp/offline_proxy.sh").read_text(
+            encoding="utf-8"
+        )
+        runtime = (model_dir / "runtime.env").read_text(encoding="utf-8")
+        entrypoint = (model_dir / "scripts/entrypoint.sh").read_text(encoding="utf-8")
+        pin_file = model_dir / "vendor/ds4-src/.pinned-commit"
+        prepare_online = (model_dir / "prepare_online.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("DeepSeek-V4-Flash-DSpark-support-0731.gguf", runtime)
+        self.assertIn("b7e9f0091139999b6c070a57590c447c5741da5c", runtime)
+        if pin_file.is_file():
+            self.assertEqual(
+                pin_file.read_text(encoding="utf-8").strip(),
+                "b7e9f0091139999b6c070a57590c447c5741da5c",
+            )
+        else:
+            # The public repository intentionally excludes vendored DS4 source.
+            # prepare_online.sh must create the same revision marker before build.
+            self.assertIn(
+                "printf '%s\\n' \"${DS4_COMMIT}\" > "
+                '"${archive_dir}/source/.pinned-commit"',
+                prepare_online,
+            )
+        self.assertIn("ds4/archive/${DS4_COMMIT}.tar.gz", prepare_online)
+        self.assertNotIn("DEFAULT_TEMPERATURE=", runtime)
+        self.assertIn("DS4_WRAPPER_REVISION=20260807.3", runtime)
+        self.assertIn("QUALITY_MODE=0", runtime)
+        self.assertNotIn('${1,,}', entrypoint)
+        self.assertIn('DSPARK_SUPPORT_GGUF_FILE: ${DSPARK_SUPPORT_GGUF_FILE}', compose)
+        self.assertNotIn("open-webui", compose)
+        self.assertIn("up -d --no-build --pull never", start)
+        self.assertIn('--mtp "${DSPARK_SUPPORT_PATH}"', entrypoint)
+        self.assertIn("--dspark", entrypoint)
+        self.assertIn('--gpu-vram "${GPU_VRAM}"', entrypoint)
+        self.assertIn('--prefill-chunk "${PREFILL_CHUNK}"', entrypoint)
+        self.assertIn("--ssd-streaming", entrypoint)
+        self.assertIn(
+            '--ssd-streaming-cache-experts "${SSD_STREAMING_CACHE_EXPERTS}"',
+            entrypoint,
+        )
+        self.assertIn(
+            "DS4_ENABLE_DSPARK=0",
+            (model_dir / "config.env.example").read_text(encoding="utf-8"),
+        )
+        self.assertNotIn("--no-mtp", entrypoint)
+        self.assertIn('"${PORT:-8080}" ds4-api', with_ui_start)
+        self.assertIn('"${OPEN_WEBUI_PORT:-3000}" ds4-webui', with_ui_start)
+        self.assertIn("stop_all_proxies", offline_proxy)
+        self.assertIn("[name]", offline_proxy)
+
+        modelctl = (REPO_ROOT / "Llamacpp/modelctl.sh").read_text(encoding="utf-8")
+        self.assertIn("DeepSeek_V4_Flash_0731_DSpark/WithoutUI/stop.sh", modelctl)
+        self.assertIn("DeepSeek_V4_Flash_0731/WithoutUI/stop.sh", modelctl)
+
+    def test_oracle_preflight_and_explicit_env_contract(self) -> None:
+        preflight = (AUTORUN_DIR / "oracle_preflight.py").read_text(encoding="utf-8")
+        manager = (AUTORUN_DIR / "PipelineManager.py").read_text(encoding="utf-8")
+
+        self.assertIn("AUTORUN_ENV_FILE", preflight)
+        self.assertIn("SELECT 1 FROM dual", preflight)
+        self.assertIn("SELECT 1 FROM v$sql", preflight)
+        self.assertIn("DBMS_XPLAN.DISPLAY", preflight)
+        self.assertIn("AUTORUN_ENV_FILE", manager)
+        self.assertIn("connection.call_timeout = self.oracle_call_timeout_ms", manager)
 
     def test_launchers_use_one_selected_virtualenv_python(self) -> None:
         runtime = (AUTORUN_DIR / "_python_runtime.sh").read_text(encoding="utf-8")
@@ -165,25 +344,32 @@ class PipelineContractTests(unittest.TestCase):
     def test_model_launchers_do_not_build_or_pull_in_offline_mode(self) -> None:
         launchers = (
             REPO_ROOT / "Llamacpp/Qwen/WithoutUI/start.sh",
-            REPO_ROOT / "Llamacpp/DeepSeekV4FlashDgxSpark/WithoutUI/start.sh",
+            REPO_ROOT / "Llamacpp/DeepSeek_V4_Flash_0731/WithoutUI/start.sh",
+            REPO_ROOT / "Llamacpp/DeepSeek_V4_Flash_0731_DSpark/WithoutUI/start.sh",
             REPO_ROOT / "Llamacpp/Hy3/Reasoning-start.sh",
         )
         compose_files = (
             REPO_ROOT / "Llamacpp/Qwen/WithoutUI/docker-compose.yml",
             REPO_ROOT
-            / "Llamacpp/DeepSeekV4FlashDgxSpark/WithoutUI/docker-compose.yml",
+            / "Llamacpp/DeepSeek_V4_Flash_0731/WithoutUI/docker-compose.yml",
+            REPO_ROOT
+            / "Llamacpp/DeepSeek_V4_Flash_0731_DSpark/WithoutUI/docker-compose.yml",
             REPO_ROOT / "Llamacpp/Hy3/Reasoning-docker-compose.yml",
         )
 
         for launcher in launchers:
             content = launcher.read_text(encoding="utf-8")
+            if "host_compose.sh" in content:
+                content += (
+                    REPO_ROOT
+                    / "Llamacpp/DeepSeek_V4_Flash_0731/scripts/host_compose.sh"
+                ).read_text(encoding="utf-8")
             self.assertIn("up -d --no-build --pull never", content)
             self.assertNotIn("up -d --build", content)
 
         for compose_file in compose_files:
             content = compose_file.read_text(encoding="utf-8")
             self.assertIn("pull_policy: never", content)
-            self.assertIn("internal:", content)
 
     def test_db_object_selection_keeps_owner_and_dependencies(self) -> None:
         objects = [
@@ -255,17 +441,13 @@ class PipelineContractTests(unittest.TestCase):
     def test_execution_binds_fail_closed_and_preserve_values(self) -> None:
         manager = object.__new__(PipelineManager)
         manager._load_db_context = lambda job: {
-            "query": {
-                "binds": [
-                    {"name": "station_id", "value": "STATION-EXAMPLE-001"}
-                ]
-            }
+            "query": {"binds": [{"name": "station_id", "value": "4311390"}]}
         }
         job = SimpleNamespace(name="bind_test")
         sql = "SELECT * FROM station WHERE station_id = :station_id"
         self.assertEqual(
             manager._execution_binds(job, sql, sql),
-            {"station_id": "STATION-EXAMPLE-001"},
+            {"station_id": "4311390"},
         )
         self.assertEqual(
             manager._execution_binds(
@@ -482,7 +664,7 @@ class PipelineContractTests(unittest.TestCase):
             )
         )
 
-    def test_feedback_retune_uses_previous_qwen_candidate(self) -> None:
+    def test_feedback_rewrite_uses_deepseek_and_previous_qwen_candidate(self) -> None:
         class Response:
             def __enter__(self):
                 return self
@@ -529,45 +711,98 @@ class PipelineContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
             manager._load_db_context = lambda unused_job: {}
+            manager.tuning_round = 2
 
-            tuner_profile = {
-                "TUNER_TEMPERATURE": "0.6",
-                "TUNER_TOP_P": "0.95",
-                "TUNER_TOP_K": "20",
-                "TUNER_MIN_P": "0.0",
-                "TUNER_PRESENCE_PENALTY": "0.0",
-                "TUNER_FREQUENCY_PENALTY": "0.0",
-                "TUNER_REPETITION_PENALTY": "1.0",
-                "TUNER_SEED": "42",
-                "TUNER_THINKING": "1",
-                "TUNER_MAX_TOKENS": "81920",
-                "TUNER_CACHE_PROMPT": "1",
+            writer_profile = {
+                "FINAL_WRITER_MODEL_NAME": "deepseek-v4-flash",
+                "FINAL_WRITER_REQUEST_STYLE": "ds4",
+                "FINAL_WRITER_TEMPERATURE": "0",
+                "FINAL_WRITER_TOP_P": "1.0",
+                "FINAL_WRITER_TOP_K": "0",
+                "FINAL_WRITER_MIN_P": "0.0",
+                "FINAL_WRITER_PRESENCE_PENALTY": "0.0",
+                "FINAL_WRITER_FREQUENCY_PENALTY": "0.0",
+                "FINAL_WRITER_REPETITION_PENALTY": "1.0",
+                "FINAL_WRITER_SEED": "42",
+                "FINAL_WRITER_THINKING_MODE": "thinking",
+                "FINAL_WRITER_REASONING_EFFORT": "max",
+                "FINAL_WRITER_AGENT_MODE": "minimal",
+                "FINAL_WRITER_MAX_TOKENS": "16384",
+                "FINAL_WRITER_CONTEXT_SIZE": "65536",
+                "FINAL_WRITER_CACHE_PROMPT": "1",
+                "FINAL_WRITER_STRUCTURED_OUTPUT": "0",
             }
-            with patch.dict("os.environ", tuner_profile, clear=False):
+            with patch.dict("os.environ", writer_profile, clear=False):
                 with patch("urllib.request.urlopen", return_value=Response()) as mocked:
                     manager._tune_with_llm(job, source.read_text(encoding="utf-8"))
 
             request_payload = json.loads(mocked.call_args.args[0].data.decode())
             tuning_input = json.loads(request_payload["messages"][1]["content"])
-            self.assertEqual(request_payload["temperature"], 0.6)
-            self.assertEqual(request_payload["top_p"], 0.95)
-            self.assertEqual(request_payload["top_k"], 20)
+            self.assertEqual(request_payload["model"], "deepseek-v4-flash")
+            self.assertEqual(request_payload["temperature"], 0.0)
+            self.assertEqual(request_payload["top_p"], 1.0)
+            self.assertEqual(request_payload["top_k"], 0)
             self.assertEqual(request_payload["min_p"], 0.0)
             self.assertEqual(request_payload["presence_penalty"], 0.0)
             self.assertEqual(request_payload["frequency_penalty"], 0.0)
             self.assertEqual(request_payload["repeat_penalty"], 1.0)
             self.assertEqual(request_payload["seed"], 42)
-            self.assertEqual(request_payload["max_tokens"], 81920)
+            self.assertEqual(request_payload["max_tokens"], 16384)
             self.assertTrue(request_payload["cache_prompt"])
-            self.assertEqual(request_payload["reasoning_format"], "deepseek")
-            self.assertEqual(
-                request_payload["chat_template_kwargs"],
-                {"enable_thinking": True},
+            self.assertNotIn("reasoning_format", request_payload)
+            self.assertTrue(request_payload["think"])
+            self.assertEqual(request_payload["reasoning_effort"], "max")
+            self.assertNotIn("chat_template_kwargs", request_payload)
+            self.assertNotIn("response_format", request_payload)
+            self.assertIn(
+                "minimal single-turn code agent",
+                request_payload["messages"][0]["content"],
             )
             self.assertEqual(tuning_input["original_sql"], "SELECT 1 FROM dual")
             self.assertEqual(tuning_input["sql"], "SELECT 2 FROM dual")
             self.assertNotIn("previous_tuned_sql", tuning_input)
             self.assertTrue(tuning_input["critic_feedback"]["critics"])
+
+    def test_failed_deepseek_rewrite_preserves_qwen_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source.sql"
+            source.write_text("SELECT 1 FROM dual", encoding="utf-8")
+            manager = PipelineManager(
+                workspace=root / "workspace",
+                source_dir=source,
+                mode="files",
+                tuner="llm",
+            )
+            try:
+                job = QueryJob(name="preserve", source_path=source, input_path=source)
+                job.tuned_path = manager.tuning_dir / "preserve-B.sql"
+                job.tuned_path.write_text("SELECT 2 FROM dual", encoding="utf-8")
+                manager.jobs = [job]
+                manager.tuning_round = 1
+                manager._ensure_model_endpoint = lambda *args: None
+                manager._tune_with_llm = lambda *args: (_ for _ in ()).throw(
+                    TimeoutError("deepseek unavailable")
+                )
+
+                with patch.dict(
+                    "os.environ",
+                    {"FINAL_WRITER_HEARTBEAT_SEC": "0"},
+                    clear=False,
+                ):
+                    manager.tune_sql()
+
+                self.assertEqual(
+                    job.tuned_path.read_text(encoding="utf-8").strip(),
+                    "SELECT 2 FROM dual",
+                )
+                report = json.loads(
+                    (manager.tuning_dir / "preserve-B.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(report["writer_role"], "writer:deepseek")
+                self.assertIn("deepseek unavailable", job.error)
+            finally:
+                manager.close()
 
     def test_critic_sampling_and_reasoning_profiles(self) -> None:
         class Response:
@@ -606,7 +841,7 @@ class PipelineContractTests(unittest.TestCase):
                 {
                     "CRITIC_DEEPSEEK_REQUEST_STYLE": "deepseek_v4",
                     "CRITIC_DEEPSEEK_TEMPERATURE": "1.0",
-                    "CRITIC_DEEPSEEK_TOP_P": "1.0",
+                    "CRITIC_DEEPSEEK_TOP_P": "0.95",
                     "CRITIC_DEEPSEEK_TOP_K": "0",
                     "CRITIC_DEEPSEEK_MIN_P": "0.0",
                     "CRITIC_DEEPSEEK_PRESENCE_PENALTY": "0.0",
@@ -614,9 +849,11 @@ class PipelineContractTests(unittest.TestCase):
                     "CRITIC_DEEPSEEK_REPETITION_PENALTY": "1.0",
                     "CRITIC_DEEPSEEK_SEED": "42",
                     "CRITIC_DEEPSEEK_THINKING_MODE": "thinking",
+                    "CRITIC_DEEPSEEK_REASONING_EFFORT": "max",
                 },
                 1.0,
-                {"thinking_mode": "thinking"},
+                0.95,
+                {"thinking_mode": "thinking", "reasoning_effort": "max"},
             ),
             (
                 "hy3",
@@ -633,6 +870,7 @@ class PipelineContractTests(unittest.TestCase):
                     "CRITIC_HY3_REASONING_EFFORT": "high",
                 },
                 0.9,
+                1.0,
                 {"reasoning_effort": "high"},
             ),
         ]
@@ -650,7 +888,7 @@ class PipelineContractTests(unittest.TestCase):
             manager._load_db_context = lambda unused_job: {}
             job = QueryJob(name="sampling", source_path=source, input_path=source)
 
-            for critic, environment, temperature, template_kwargs in profiles:
+            for critic, environment, temperature, top_p, template_kwargs in profiles:
                 with self.subTest(critic=critic):
                     with patch.dict("os.environ", environment, clear=False):
                         with patch(
@@ -665,7 +903,7 @@ class PipelineContractTests(unittest.TestCase):
 
                     request_payload = json.loads(mocked.call_args.args[0].data.decode())
                     self.assertEqual(request_payload["temperature"], temperature)
-                    self.assertEqual(request_payload["top_p"], 1.0)
+                    self.assertEqual(request_payload["top_p"], top_p)
                     self.assertEqual(request_payload["top_k"], 0)
                     self.assertEqual(request_payload["min_p"], 0.0)
                     self.assertEqual(request_payload["presence_penalty"], 0.0)

@@ -25,6 +25,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 DEFAULT_TUNER_PROMPT_PATH = REPO_ROOT / "txt" / "MasteryPrompt.txt"
 DEFAULT_CRITIC_PROMPT_PATH = REPO_ROOT / "txt" / "CriticPrompt.txt"
+DEFAULT_DEEPSEEK_AGENT_PROMPT_PATH = (
+    REPO_ROOT / "txt" / "DeepSeekV4Flash0731CodeAgentMaxPrompt.txt"
+)
 DEFAULT_TUNER_RESPONSE_SCHEMA_PATH = REPO_ROOT / "contracts" / "tuner_response.schema.json"
 DEFAULT_CRITIC_RESPONSE_SCHEMA_PATH = REPO_ROOT / "contracts" / "critic_response.schema.json"
 DEFAULT_DB_CATALOG_SCHEMA_PATH = REPO_ROOT / "contracts" / "db_catalog.schema.json"
@@ -123,6 +126,11 @@ class PipelineManager:
             "CRITIC_PROMPT_PATH",
             DEFAULT_CRITIC_PROMPT_PATH,
             self._default_critic_prompt(),
+        )
+        self.deepseek_agent_prompt, self.deepseek_agent_prompt_meta = self._load_prompt(
+            "FINAL_WRITER_AGENT_PROMPT_PATH",
+            DEFAULT_DEEPSEEK_AGENT_PROMPT_PATH,
+            self._default_deepseek_agent_prompt(),
         )
         self.tuner_response_schema, self.tuner_response_schema_meta = self._load_json_contract(
             "TUNER_RESPONSE_SCHEMA_PATH",
@@ -381,14 +389,15 @@ class PipelineManager:
 
     def tune_sql(self) -> None:
         self.tuning_round += 1
+        writer_profile = self._current_writer_profile()
         round_dir = self.tuning_dir / "rounds" / f"round-{self.tuning_round}"
         round_dir.mkdir(parents=True, exist_ok=True)
         pending_jobs = [job for job in self.jobs if job.status != QueryStatus.VERIFYING]
         if pending_jobs and self._should_use_llm():
             self._ensure_model_endpoint(
-                "tuner",
-                self._env("MODEL_NAME", "qwen-sql-tuner"),
-                self._env("API_BASE_URL", "http://localhost:8080/v1"),
+                writer_profile["role"],
+                writer_profile["model"],
+                writer_profile["base_url"],
             )
 
         active_jobs = [job for job in self.jobs if job.status != QueryStatus.VERIFYING]
@@ -398,12 +407,18 @@ class PipelineManager:
             sql = self._read_sql(job)
 
             if self._should_use_llm():
-                phase = "initial" if self.tuning_round == 1 else "critic-feedback retune"
+                phase = (
+                    "initial draft"
+                    if self.tuning_round == 1
+                    else "critic-feedback final rewrite"
+                )
+                writer_label = writer_profile["label"]
                 started_at = time.monotonic()
                 self._log(
-                    f"Qwen {phase} [{job_index}/{total_jobs}] {job.name}: request started"
+                    f"{writer_label} {phase} [{job_index}/{total_jobs}] "
+                    f"{job.name}: request started"
                 )
-                heartbeat_interval = max(0, int(self._env("TUNER_HEARTBEAT_SEC", "15")))
+                heartbeat_interval = max(0, int(writer_profile["heartbeat_sec"]))
                 heartbeat_stop = threading.Event()
                 heartbeat_thread: threading.Thread | None = None
                 if heartbeat_interval > 0:
@@ -411,7 +426,8 @@ class PipelineManager:
                         while not heartbeat_stop.wait(heartbeat_interval):
                             elapsed = time.monotonic() - started_at
                             self._log(
-                                f"Qwen {phase} [{job_index}/{total_jobs}] {job.name}: "
+                                f"{writer_label} {phase} [{job_index}/{total_jobs}] "
+                                f"{job.name}: "
                                 f"still waiting ({elapsed:.0f}s)"
                             )
 
@@ -422,14 +438,17 @@ class PipelineManager:
                     job.error = None
                 except Exception as exc:
                     job.error = f"tuner request failed: {exc}"
+                    fallback_sql = sql
+                    if self.tuning_round > 1 and job.tuned_path and job.tuned_path.is_file():
+                        fallback_sql = job.tuned_path.read_text(encoding="utf-8").strip()
                     tuning_result = {
-                        "sql": sql,
-                        "why": ["original_sql_returned_after_tuner_failure"],
+                        "sql": fallback_sql,
+                        "why": ["previous_candidate_preserved_after_writer_failure"],
                         "risk": [job.error],
                         "check": ["retry_only_this_query_after_model_recovery"],
                     }
                     self._log(
-                        f"Qwen {phase} [{job_index}/{total_jobs}] {job.name}: "
+                        f"{writer_label} {phase} [{job_index}/{total_jobs}] {job.name}: "
                         f"failed closed: {exc}"
                     )
                 finally:
@@ -437,7 +456,7 @@ class PipelineManager:
                     if heartbeat_thread is not None:
                         heartbeat_thread.join(timeout=1)
                 self._log(
-                    f"Qwen {phase} [{job_index}/{total_jobs}] {job.name}: "
+                    f"{writer_label} {phase} [{job_index}/{total_jobs}] {job.name}: "
                     f"completed in {time.monotonic() - started_at:.1f}s"
                 )
             else:
@@ -464,9 +483,14 @@ class PipelineManager:
                 "input_sql_source": (
                     "original" if self.tuning_round == 1 else "previous_tuning_round"
                 ),
-                "tuner": self._active_tuner_name(),
+                "tuner": writer_profile["model"] if self._should_use_llm() else "local_draft",
+                "writer_role": writer_profile["role"],
                 "prompt": (
-                    self.tuner_prompt_meta
+                    (
+                        self.deepseek_agent_prompt_meta
+                        if writer_profile["role"] == "writer:deepseek"
+                        else self.tuner_prompt_meta
+                    )
                     if self._should_use_llm()
                     else {"source": "not_used", "reason": "local_tuner"}
                 ),
@@ -754,7 +778,7 @@ class PipelineManager:
                 job.status = QueryStatus.RETRY
         self._log(
             f"Critic feedback saved ({', '.join(self.critics)}); "
-            f"preparing Qwen feedback retune "
+            f"preparing DeepSeek 0731 feedback rewrite "
             f"[{round_number}/{self.critic_retune_rounds}]"
         )
         self._write_status()
@@ -1077,13 +1101,116 @@ WHERE ROWNUM <= :query_limit
         return bool(self._env("API_BASE_URL"))
 
     def _active_tuner_name(self) -> str:
-        return "llm" if self._should_use_llm() else "local_draft"
+        if not self._should_use_llm():
+            return "local_draft"
+        return self._current_writer_profile()["model"]
+
+    def _current_writer_profile(self) -> dict[str, str]:
+        use_final_writer = self.tuning_round > 1 and self._env_bool(
+            "FINAL_WRITER_ENABLED", True
+        )
+        if use_final_writer:
+            return {
+                "role": "writer:deepseek",
+                "label": self._env("FINAL_WRITER_LABEL", "DeepSeek 0731"),
+                "model": self._env(
+                    "FINAL_WRITER_MODEL_NAME", "deepseek-v4-flash"
+                ),
+                "base_url": self._env(
+                    "FINAL_WRITER_API_BASE_URL",
+                    self._env("API_BASE_URL", "http://localhost:8080/v1"),
+                ),
+                "api_key": self._env(
+                    "FINAL_WRITER_API_KEY", self._env("API_KEY", "sk-local")
+                ),
+                "temperature": self._env("FINAL_WRITER_TEMPERATURE", "0"),
+                "top_p": self._env("FINAL_WRITER_TOP_P", "1.0"),
+                "top_k": self._env("FINAL_WRITER_TOP_K", "0"),
+                "min_p": self._env("FINAL_WRITER_MIN_P", "0.0"),
+                "presence_penalty": self._env(
+                    "FINAL_WRITER_PRESENCE_PENALTY", "0.0"
+                ),
+                "frequency_penalty": self._env(
+                    "FINAL_WRITER_FREQUENCY_PENALTY", "0.0"
+                ),
+                "repetition_penalty": self._env(
+                    "FINAL_WRITER_REPETITION_PENALTY", "1.0"
+                ),
+                "seed": self._env("FINAL_WRITER_SEED", "42"),
+                "max_tokens": self._env("FINAL_WRITER_MAX_TOKENS", "16384"),
+                "context_size": self._env("FINAL_WRITER_CONTEXT_SIZE", "32768"),
+                "context_safety_tokens": self._env(
+                    "FINAL_WRITER_CONTEXT_SAFETY_TOKENS", "4096"
+                ),
+                "min_output_tokens": self._env(
+                    "FINAL_WRITER_MIN_OUTPUT_TOKENS", "2048"
+                ),
+                "request_style": self._env(
+                    "FINAL_WRITER_REQUEST_STYLE", "ds4"
+                ),
+                "thinking_mode": self._env(
+                    "FINAL_WRITER_THINKING_MODE", "thinking"
+                ),
+                "reasoning_effort": self._env(
+                    "FINAL_WRITER_REASONING_EFFORT", "max"
+                ),
+                "agent_mode": self._env("FINAL_WRITER_AGENT_MODE", "minimal"),
+                "reasoning_format": "",
+                "thinking": "",
+                "cache_prompt": self._env("FINAL_WRITER_CACHE_PROMPT", "1"),
+                "structured_output": self._env(
+                    "FINAL_WRITER_STRUCTURED_OUTPUT", "0"
+                ),
+                "timeout_sec": self._env("FINAL_WRITER_TIMEOUT_SEC", "10800"),
+                "api_attempts": self._env("FINAL_WRITER_API_ATTEMPTS", "2"),
+                "heartbeat_sec": self._env("FINAL_WRITER_HEARTBEAT_SEC", "15"),
+            }
+
+        return {
+            "role": "tuner",
+            "label": self._env("TUNER_LABEL", "Qwen"),
+            "model": self._env("MODEL_NAME", "qwen-sql-tuner"),
+            "base_url": self._env("API_BASE_URL", "http://localhost:8080/v1"),
+            "api_key": self._env("API_KEY", "sk-local"),
+            "temperature": self._env("TUNER_TEMPERATURE", "0.6"),
+            "top_p": self._env("TUNER_TOP_P", "0.95"),
+            "top_k": self._env("TUNER_TOP_K", "20"),
+            "min_p": self._env("TUNER_MIN_P", "0.0"),
+            "presence_penalty": self._env("TUNER_PRESENCE_PENALTY", "0.0"),
+            "frequency_penalty": self._env("TUNER_FREQUENCY_PENALTY", "0.0"),
+            "repetition_penalty": self._env("TUNER_REPETITION_PENALTY", "1.0"),
+            "seed": self._env("TUNER_SEED", "42"),
+            "max_tokens": self._env("TUNER_MAX_TOKENS", "0"),
+            "context_size": self._env(
+                "TUNER_CONTEXT_SIZE", self._env("QWEN_CTX_SIZE", "131072")
+            ),
+            "context_safety_tokens": self._env(
+                "TUNER_CONTEXT_SAFETY_TOKENS", "4096"
+            ),
+            "min_output_tokens": self._env("TUNER_MIN_OUTPUT_TOKENS", "2048"),
+            "request_style": "qwen",
+            "thinking_mode": "",
+            "reasoning_effort": "",
+            "agent_mode": "",
+            "reasoning_format": self._env("TUNER_REASONING_FORMAT", "deepseek"),
+            "thinking": self._env("TUNER_THINKING", "1"),
+            "cache_prompt": self._env("TUNER_CACHE_PROMPT", "1"),
+            "structured_output": self._env("TUNER_STRUCTURED_OUTPUT", "1"),
+            "timeout_sec": self._env("TUNER_TIMEOUT_SEC", "1800"),
+            "api_attempts": self._env("TUNER_API_ATTEMPTS", "2"),
+            "heartbeat_sec": self._env("TUNER_HEARTBEAT_SEC", "15"),
+        }
 
     def _refresh_tuner_prompt(self) -> None:
         self.tuner_prompt, self.tuner_prompt_meta = self._load_prompt(
             "TUNER_PROMPT_PATH",
             DEFAULT_TUNER_PROMPT_PATH,
             self._default_tuner_prompt(),
+        )
+        self.deepseek_agent_prompt, self.deepseek_agent_prompt_meta = self._load_prompt(
+            "FINAL_WRITER_AGENT_PROMPT_PATH",
+            DEFAULT_DEEPSEEK_AGENT_PROMPT_PATH,
+            self._default_deepseek_agent_prompt(),
         )
         self.tuner_response_schema, self.tuner_response_schema_meta = self._load_json_contract(
             "TUNER_RESPONSE_SCHEMA_PATH",
@@ -1207,6 +1334,16 @@ WHERE ROWNUM <= :query_limit
             "Preserve business logic exactly. Return strict compact JSON only with schema "
             '{"sql":"...","why":["..."],"risk":["..."],"check":["..."]}. '
             "The sql field must contain executable Oracle SQL only."
+        )
+
+    @staticmethod
+    def _default_deepseek_agent_prompt() -> str:
+        return (
+            "Operate as a minimal single-turn code agent for this Oracle SQL rewrite. "
+            "Use maximum private reasoning effort before answering. Thoroughly decompose "
+            "the supplied evidence, test assumptions and edge cases, and reject unsafe "
+            "alternatives. Do not request tools or additional turns. Return only the "
+            "required compact JSON and never expose private reasoning."
         )
 
     @staticmethod
@@ -1519,9 +1656,10 @@ WHERE ROWNUM <= :query_limit
 
     def _tune_with_llm(self, job: QueryJob, sql: str) -> dict[str, Any]:
         self._refresh_tuner_prompt()
-        base_url = self._env("API_BASE_URL", "http://localhost:8080/v1").rstrip("/")
-        api_key = self._env("API_KEY", "your-local-api-key")
-        model = self._env("MODEL_NAME", "qwen-sql-tuner")
+        writer_profile = self._current_writer_profile()
+        base_url = writer_profile["base_url"].rstrip("/")
+        api_key = writer_profile["api_key"]
+        model = writer_profile["model"]
         analysis_payload = self._load_json_file(self.analysis_dir / f"{job.name}.json")
         if not analysis_payload and job.analysis_path:
             analysis_payload = {"text": job.analysis_path.read_text(encoding="utf-8")}
@@ -1540,27 +1678,29 @@ WHERE ROWNUM <= :query_limit
             # In a feedback round the current candidate and the original are both
             # useful, but the candidate must not be duplicated under two keys.
             tuning_input["original_sql"] = sql
+        fallback_sql = previous_tuned_sql or sql
+
+        system_prompt = self._render_tuner_prompt(job, analysis_payload)
+        if (
+            writer_profile["role"] == "writer:deepseek"
+            and writer_profile["agent_mode"].strip().lower() == "minimal"
+        ):
+            system_prompt = f"{self.deepseek_agent_prompt}\n\n{system_prompt}"
 
         payload = {
             "model": model,
-            "temperature": float(self._env("TUNER_TEMPERATURE", "0.6")),
-            "top_p": float(self._env("TUNER_TOP_P", "0.95")),
-            "top_k": int(self._env("TUNER_TOP_K", "20")),
-            "min_p": float(self._env("TUNER_MIN_P", "0.0")),
-            "presence_penalty": float(
-                self._env("TUNER_PRESENCE_PENALTY", "0.0")
-            ),
-            "frequency_penalty": float(
-                self._env("TUNER_FREQUENCY_PENALTY", "0.0")
-            ),
-            "repeat_penalty": float(
-                self._env("TUNER_REPETITION_PENALTY", "1.0")
-            ),
-            "seed": int(self._env("TUNER_SEED", "42")),
+            "temperature": float(writer_profile["temperature"]),
+            "top_p": float(writer_profile["top_p"]),
+            "top_k": int(writer_profile["top_k"]),
+            "min_p": float(writer_profile["min_p"]),
+            "presence_penalty": float(writer_profile["presence_penalty"]),
+            "frequency_penalty": float(writer_profile["frequency_penalty"]),
+            "repeat_penalty": float(writer_profile["repetition_penalty"]),
+            "seed": int(writer_profile["seed"]),
             "messages": [
                 {
                     "role": "system",
-                    "content": self._render_tuner_prompt(job, analysis_payload),
+                    "content": system_prompt,
                 },
                 {
                     "role": "user",
@@ -1568,21 +1708,21 @@ WHERE ROWNUM <= :query_limit
                 },
             ],
         }
-        tuner_max_tokens = int(self._env("TUNER_MAX_TOKENS", "0"))
+        tuner_max_tokens = int(writer_profile["max_tokens"])
         if tuner_max_tokens > 0:
             context_size = max(
                 1,
-                int(self._env("TUNER_CONTEXT_SIZE", self._env("QWEN_CTX_SIZE", "131072"))),
+                int(writer_profile["context_size"]),
             )
             safety_tokens = max(
-                0, int(self._env("TUNER_CONTEXT_SAFETY_TOKENS", "4096"))
+                0, int(writer_profile["context_safety_tokens"])
             )
             estimated_input_tokens = self._estimate_tokens(
                 self._json_dumps(payload["messages"])
             )
             available_output_tokens = context_size - estimated_input_tokens - safety_tokens
             minimum_output_tokens = max(
-                256, int(self._env("TUNER_MIN_OUTPUT_TOKENS", "2048"))
+                256, int(writer_profile["min_output_tokens"])
             )
             if available_output_tokens < minimum_output_tokens:
                 raise RuntimeError(
@@ -1597,22 +1737,48 @@ WHERE ROWNUM <= :query_limit
                 "safety_tokens": safety_tokens,
                 "requested_output_tokens": tuner_max_tokens,
                 "effective_output_tokens": payload["max_tokens"],
+                "requested_reasoning_effort": writer_profile["reasoning_effort"],
+                "effective_reasoning_effort": (
+                    "high"
+                    if writer_profile["request_style"].strip().lower() == "ds4"
+                    and writer_profile["reasoning_effort"].strip().lower() == "max"
+                    and context_size < 393216
+                    else writer_profile["reasoning_effort"]
+                ),
             }
         else:
             context_budget = {}
-        tuner_thinking = self._env("TUNER_THINKING", "1")
-        if tuner_thinking:
+        request_style = writer_profile["request_style"].strip().lower()
+        tuner_thinking = writer_profile["thinking"]
+        if request_style == "qwen" and tuner_thinking:
             payload["chat_template_kwargs"] = {
                 "enable_thinking": tuner_thinking.strip().lower()
                 in {"1", "true", "yes", "y", "on"}
             }
-        tuner_reasoning_format = self._env(
-            "TUNER_REASONING_FORMAT", "deepseek"
-        ).strip()
-        if tuner_reasoning_format:
+        elif request_style in {"deepseek_v4", "deepseek_v4_llamacpp"}:
+            payload["chat_template_kwargs"] = {
+                "thinking_mode": writer_profile["thinking_mode"] or "thinking",
+                "reasoning_effort": writer_profile["reasoning_effort"] or "max",
+            }
+        elif request_style in {"dwarfstar", "ds4"}:
+            thinking_mode = writer_profile["thinking_mode"].strip().lower()
+            if thinking_mode:
+                payload["think"] = thinking_mode not in {
+                    "0", "false", "no", "off", "disabled", "none", "nothink"
+                }
+            if writer_profile["reasoning_effort"]:
+                payload["reasoning_effort"] = writer_profile["reasoning_effort"]
+        else:
+            raise ValueError(f"unsupported writer request style: {request_style}")
+        tuner_reasoning_format = writer_profile["reasoning_format"].strip()
+        if request_style == "qwen" and tuner_reasoning_format:
             payload["reasoning_format"] = tuner_reasoning_format
-        payload["cache_prompt"] = self._env_bool("TUNER_CACHE_PROMPT", True)
-        if self._env_bool("TUNER_STRUCTURED_OUTPUT", True):
+        payload["cache_prompt"] = writer_profile["cache_prompt"].strip().lower() in {
+            "1", "true", "yes", "y", "on"
+        }
+        if writer_profile["structured_output"].strip().lower() in {
+            "1", "true", "yes", "y", "on"
+        }:
             payload["response_format"] = self._json_schema_response_format(
                 "oracle_sql_tuner_response",
                 self.tuner_response_schema,
@@ -1628,8 +1794,8 @@ WHERE ROWNUM <= :query_limit
             method="POST",
         )
 
-        timeout = int(self._env("TUNER_TIMEOUT_SEC", "1800"))
-        attempts = max(1, int(self._env("TUNER_API_ATTEMPTS", "2")))
+        timeout = int(writer_profile["timeout_sec"])
+        attempts = max(1, int(writer_profile["api_attempts"]))
         body: dict[str, Any] | None = None
         for attempt in range(1, attempts + 1):
             try:
@@ -1642,7 +1808,8 @@ WHERE ROWNUM <= :query_limit
                 if attempt >= attempts or not retryable:
                     raise RuntimeError(f"LLM API 호출 실패: {exc}") from exc
                 self._log(
-                    f"Qwen API attempt {attempt}/{attempts} failed: {exc}; retrying"
+                    f"{writer_profile['label']} API attempt {attempt}/{attempts} "
+                    f"failed: {exc}; retrying"
                 )
                 time.sleep(min(2**attempt, 5))
 
@@ -1658,7 +1825,7 @@ WHERE ROWNUM <= :query_limit
         finish_reason = str(choices[0].get("finish_reason") or "")
         if finish_reason in {"length", "max_tokens"}:
             return {
-                "sql": sql,
+                "sql": fallback_sql,
                 "why": ["original_sql_returned_after_truncated_model_response"],
                 "risk": [f"model_finish_reason={finish_reason}"],
                 "check": ["reduce_reasoning_or_input_size_before_retry"],
@@ -1671,7 +1838,7 @@ WHERE ROWNUM <= :query_limit
             parsed = self._extract_json_object(content)
         except (json.JSONDecodeError, ValueError) as exc:
             return {
-                "sql": sql,
+                "sql": fallback_sql,
                 "why": ["original_sql_returned_after_invalid_model_response"],
                 "risk": [f"response_not_structured_json: {exc}"],
                 "check": ["fix_model_response_format_before_retry"],
@@ -1683,7 +1850,7 @@ WHERE ROWNUM <= :query_limit
         contract_errors = self._validate_json_contract(parsed, self.tuner_response_schema)
         if contract_errors:
             return {
-                "sql": sql,
+                "sql": fallback_sql,
                 "why": ["original_sql_returned_after_schema_validation_failure"],
                 "risk": contract_errors,
                 "check": ["fix_tuner_response_contract_before_retry"],
@@ -1740,7 +1907,7 @@ WHERE ROWNUM <= :query_limit
         api_key = (
             self._env(f"CRITIC_{env_key}_API_KEY")
             or self._env("CRITIC_API_KEY")
-            or self._env("API_KEY", "your-local-api-key")
+            or self._env("API_KEY", "sk-local")
         )
         model = (
             self._env(f"CRITIC_{env_key}_MODEL_NAME")
@@ -1865,7 +2032,8 @@ WHERE ROWNUM <= :query_limit
                 payload["reasoning_effort"] = reasoning_effort
         elif request_style in {"deepseek_v4", "deepseek_v4_llamacpp"}:
             payload["chat_template_kwargs"] = {
-                "thinking_mode": thinking_mode or "thinking"
+                "thinking_mode": thinking_mode or "thinking",
+                "reasoning_effort": reasoning_effort or "max",
             }
         elif request_style in {"hy3", "hy3_llamacpp"}:
             payload["chat_template_kwargs"] = {
@@ -2587,6 +2755,8 @@ WHERE ROWNUM <= :query_limit
         if role.startswith("critic:"):
             critic = role.split(":", 1)[1]
             env_name = f"CRITIC_{self._env_key(critic)}_START_SCRIPT"
+        elif role.startswith("writer:"):
+            env_name = "FINAL_WRITER_START_SCRIPT"
         start_script_raw = self._env(env_name)
         if not self.auto_model_swap or not start_script_raw:
             raise RuntimeError(
@@ -2979,6 +3149,7 @@ WHERE ROWNUM <= :query_limit
             "prompts": {
                 "tuner": self.tuner_prompt_meta,
                 "critic": self.critic_prompt_meta,
+                "deepseek_agent": self.deepseek_agent_prompt_meta,
             },
             "response_schemas": {
                 "tuner": self.tuner_response_schema_meta,
@@ -3033,13 +3204,17 @@ WHERE ROWNUM <= :query_limit
         if value is not None:
             return value
 
-        env_paths = [
+        env_paths = []
+        explicit_env = os.getenv("AUTORUN_ENV_FILE", "").strip()
+        if explicit_env:
+            env_paths.append(Path(explicit_env).expanduser())
+        env_paths.extend([
             SCRIPT_DIR / ".env",
             REPO_ROOT / ".env",
             self.workspace.parent / ".env",
             self.workspace.parent.parent / ".env",
             Path.cwd() / ".env",
-        ]
+        ])
 
         seen_env_paths: set[Path] = set()
         for env_path in env_paths:

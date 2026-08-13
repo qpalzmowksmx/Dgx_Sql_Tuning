@@ -2,12 +2,27 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PID_FILE="${TMPDIR:-/tmp}/llm-sql-offline-proxy-${UID}.pid"
-LOG_FILE="${TMPDIR:-/tmp}/llm-sql-offline-proxy-${UID}.log"
+PROXY_BASE="${TMPDIR:-/tmp}/llm-sql-offline-proxy-${UID}"
 
-stop_proxy() {
-  if [[ -f "${PID_FILE}" ]]; then
-    pid="$(cat "${PID_FILE}")"
+set_proxy_paths() {
+  local name="${1:-default}"
+  [[ "${name}" =~ ^[A-Za-z0-9_.-]+$ ]] || {
+    echo "Invalid proxy name: ${name}" >&2
+    exit 2
+  }
+  if [[ "${name}" == "default" ]]; then
+    PID_FILE="${PROXY_BASE}.pid"
+    LOG_FILE="${PROXY_BASE}.log"
+  else
+    PID_FILE="${PROXY_BASE}-${name}.pid"
+    LOG_FILE="${PROXY_BASE}-${name}.log"
+  fi
+}
+
+stop_proxy_file() {
+  local pid_file="$1" pid
+  if [[ -f "${pid_file}" ]]; then
+    pid="$(cat "${pid_file}")"
     if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" >/dev/null 2>&1; then
       kill "${pid}"
       for _ in {1..20}; do
@@ -15,20 +30,29 @@ stop_proxy() {
         sleep 0.1
       done
     fi
-    rm -f "${PID_FILE}"
+    rm -f "${pid_file}"
   fi
+}
+
+stop_all_proxies() {
+  local pid_file
+  for pid_file in "${PROXY_BASE}.pid" "${PROXY_BASE}-"*.pid; do
+    [[ -e "${pid_file}" ]] || continue
+    stop_proxy_file "${pid_file}"
+  done
 }
 
 case "${1:-}" in
   start)
-    [[ $# -eq 4 ]] || {
-      echo "Usage: $0 start <container> <container-port> <listen-port>" >&2
+    [[ $# -eq 4 || $# -eq 5 ]] || {
+      echo "Usage: $0 start <container> <container-port> <listen-port> [name]" >&2
       exit 2
     }
     container="$2"
     target_port="$3"
     listen_port="$4"
-    stop_proxy
+    set_proxy_paths "${5:-default}"
+    stop_proxy_file "${PID_FILE}"
     target_ip="$(
       docker inspect "${container}" \
         --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
@@ -60,18 +84,23 @@ PY
       sleep 0.1
     done
     echo "Offline proxy failed to start; see ${LOG_FILE}" >&2
-    stop_proxy
+    stop_proxy_file "${PID_FILE}"
     exit 1
     ;;
   stop)
-    [[ $# -eq 1 ]] || {
-      echo "Usage: $0 stop" >&2
+    [[ $# -eq 1 || $# -eq 2 ]] || {
+      echo "Usage: $0 stop [name]" >&2
       exit 2
     }
-    stop_proxy
+    if [[ $# -eq 1 ]]; then
+      stop_all_proxies
+    else
+      set_proxy_paths "$2"
+      stop_proxy_file "${PID_FILE}"
+    fi
     ;;
   *)
-    echo "Usage: $0 {start <container> <container-port> <listen-port>|stop}" >&2
+    echo "Usage: $0 {start <container> <container-port> <listen-port> [name]|stop [name]}" >&2
     exit 2
     ;;
 esac

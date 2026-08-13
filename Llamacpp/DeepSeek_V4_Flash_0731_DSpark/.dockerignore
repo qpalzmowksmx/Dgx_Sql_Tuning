@@ -1,0 +1,9 @@
+.git
+.DS_Store
+config.env
+open-webui.env
+models
+logs
+WithUI
+README.md
+prepare_online.sh
